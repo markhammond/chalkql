@@ -35,7 +35,8 @@ public final class PolicyExplain {
       ImmutableList<Column> columns,
       @Nullable RexNode folded,
       ImmutableList<Parent> parents,
-      ImmutableList<Path> paths) {}
+      ImmutableList<Path> paths,
+      java.util.function.Function<RexNode, String> said) {}
 
   /**
    * One declared path this table holds a tenancy along (D265 §6): which perspective answered for a
@@ -83,26 +84,28 @@ public final class PolicyExplain {
       EntitlementPass.LeafFold fold,
       RelDataType rowType,
       PolicyOptions options) {
+    ExplainedSql.Row row = fold.explainedRow(rowType);
     List<Column> columns = new ArrayList<>(rowType.getFieldCount());
     for (int i = 0; i < rowType.getFieldCount(); i++) {
       DescriptorExpressions.Column entitled = fold.descriptor().column(i);
       columns.add(
           new Column(
               rowType.getFieldList().get(i).getName(),
-              disclosure(fold, i, entitled),
-              mask(fold, i, entitled),
-              placeholder(fold, i, entitled),
+              disclosure(fold, i, entitled, row),
+              mask(fold, i, entitled, row),
+              placeholder(fold, i, entitled, row),
               floor(fold, i, entitled, options)));
     }
 
     return new Table(
         fold.table().schemaName(),
         fold.table().tableName(),
-        fold.predicate() == null ? "" : fold.predicate().toString(),
+        ExplainedSql.render(fold.predicate(), row),
         ImmutableList.copyOf(columns),
         fold.predicate(),
         parents(fold, rowType),
-        paths(fold));
+        paths(fold),
+        rex -> ExplainedSql.render(rex, row));
   }
 
   /** The paths, as the pass resolved and folded them for this principal (D265 §6). */
@@ -161,7 +164,10 @@ public final class PolicyExplain {
    * not", written in the terms the descriptor was.
    */
   private static String disclosure(
-      EntitlementPass.LeafFold fold, int column, DescriptorExpressions.@Nullable Column entitled) {
+      EntitlementPass.LeafFold fold,
+      int column,
+      DescriptorExpressions.@Nullable Column entitled,
+      ExplainedSql.Row row) {
     Disclosed outcome = fold.map().of(column);
     if (fold.statistical().contains(column)) {
       return "AGGREGATE (statistical: raw under the group-size floor)";
@@ -174,9 +180,7 @@ public final class PolicyExplain {
     StringBuilder text = new StringBuilder();
     for (int i = 0; i < reachable.rules().size(); i++) {
       int rule = reachable.rules().get(i);
-      text.append("WHEN ")
-          .append(reachable.conditions().get(i))
-          .append(" THEN ")
+      text.append(when(reachable.conditions().get(i), row))
           .append(name(entitled.rules().get(rule).getThen()))
           .append("; ");
     }
@@ -212,7 +216,10 @@ public final class PolicyExplain {
    * THEN …} shape the disclosure uses; and none is empty, as where the fold leaves the column full.
    */
   private static String mask(
-      EntitlementPass.LeafFold fold, int column, DescriptorExpressions.@Nullable Column entitled) {
+      EntitlementPass.LeafFold fold,
+      int column,
+      DescriptorExpressions.@Nullable Column entitled,
+      ExplainedSql.Row row) {
     EntitlementPass.Reachable reachable = fold.reachable().get(column);
     if (entitled == null || reachable == null) {
       return "";
@@ -224,16 +231,15 @@ public final class PolicyExplain {
       int rule = reachable.rules().get(i);
       RexNode mask = entitled.maskOf(rule);
       if (entitled.rules().get(rule).getThen() == Disclosure.DISCLOSURE_MASKED && mask != null) {
-        RexNode condition = reachable.conditions().get(i);
-        conditions.add(condition.isAlwaysTrue() ? "" : condition.toString());
-        masks.add(mask.toString());
+        conditions.add(when(reachable.conditions().get(i), row));
+        masks.add(ExplainedSql.render(mask, row));
       }
     }
     if (reachable.otherwiseReachable()
         && reachable.otherwise() == Disclosure.DISCLOSURE_MASKED
         && entitled.mask() != null) {
-      conditions.add("");
-      masks.add(entitled.mask().toString());
+      conditions.add("ELSE ");
+      masks.add(ExplainedSql.render(entitled.mask(), row));
     }
 
     if (new LinkedHashSet<>(masks).size() == 1) {
@@ -241,9 +247,7 @@ public final class PolicyExplain {
     }
     StringBuilder text = new StringBuilder();
     for (int i = 0; i < masks.size(); i++) {
-      text.append(conditions.get(i).isEmpty() ? "ELSE " : "WHEN " + conditions.get(i) + " THEN ")
-          .append(masks.get(i))
-          .append("; ");
+      text.append(conditions.get(i)).append(masks.get(i)).append("; ");
     }
     return text.isEmpty() ? "" : text.substring(0, text.length() - 2);
   }
@@ -257,34 +261,52 @@ public final class PolicyExplain {
    * a property of the request rather than of the column and is reported there.
    */
   private static String placeholder(
-      EntitlementPass.LeafFold fold, int column, DescriptorExpressions.@Nullable Column entitled) {
+      EntitlementPass.LeafFold fold,
+      int column,
+      DescriptorExpressions.@Nullable Column entitled,
+      ExplainedSql.Row row) {
     if (entitled == null) {
       return "";
     }
-    String columnPlaceholder = entitled.placeholder() == null ? "" : entitled.placeholder().toString();
+    String columnPlaceholder = ExplainedSql.render(entitled.placeholder(), row);
     EntitlementPass.Reachable reachable = fold.reachable().get(column);
     if (reachable == null) {
       return columnPlaceholder;
     }
 
     StringBuilder text = new StringBuilder();
+    int stated = 0;
+    String only = "";
     for (int i = 0; i < reachable.rules().size(); i++) {
       int rule = reachable.rules().get(i);
       if (entitled.rules().get(rule).getPlaceholder().isBlank()) {
         continue;
       }
-      text.append("WHEN ")
-          .append(reachable.conditions().get(i))
-          .append(" THEN ")
-          .append(entitled.placeholderOf(rule))
+      String condition = when(reachable.conditions().get(i), row);
+      only = condition.equals("ELSE ") ? ExplainedSql.render(entitled.placeholderOf(rule), row) : "";
+      stated++;
+      text.append(condition)
+          .append(ExplainedSql.render(entitled.placeholderOf(rule), row))
           .append("; ");
     }
     if (text.isEmpty()) {
       return columnPlaceholder;
     }
+    // One stand-in that every row reaching it takes is that stand-in, as one mask is.
+    if (stated == 1 && !only.isEmpty() && columnPlaceholder.isEmpty()) {
+      return only;
+    }
     return columnPlaceholder.isEmpty()
         ? text.substring(0, text.length() - 2)
         : text.append("ELSE ").append(columnPlaceholder).toString();
+  }
+
+  /**
+   * A reachable rule's condition as its branch opens: {@code WHEN <condition> THEN }, or {@code ELSE
+   * } where the fold left it always true, since every row that reaches it takes it.
+   */
+  private static String when(RexNode condition, ExplainedSql.Row row) {
+    return condition.isAlwaysTrue() ? "ELSE " : "WHEN " + ExplainedSql.render(condition, row) + " THEN ";
   }
 
   private static String name(Disclosure disclosure) {
@@ -315,7 +337,7 @@ public final class PolicyExplain {
     List<String> residual = new ArrayList<>();
     for (RexNode conjunct : RelOptUtil.conjunctions(table.folded())) {
       if (!pushed.contains(conjunct.toString())) {
-        residual.add(conjunct.toString());
+        residual.add(table.said().apply(conjunct));
       }
     }
     return residual;

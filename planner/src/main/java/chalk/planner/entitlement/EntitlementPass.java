@@ -356,6 +356,123 @@ public final class EntitlementPass {
       return parents;
     }
 
+    /**
+     * How the oracle says each position of the row this leaf's folded expressions read (F286): the
+     * table's own columns by name; past them, for each parent side the join emits, the key it joined
+     * on as {@code table.column}, its match marker as the {@code EXISTS} its being non-null means,
+     * and each verdict as the expression it is over that parent's own columns.
+     */
+    ExplainedSql.Row explainedRow(RelDataType rowType) {
+      List<org.apache.calcite.sql.SqlNode> fields = new ArrayList<>();
+      for (org.apache.calcite.rel.type.RelDataTypeField field : rowType.getFieldList()) {
+        fields.add(ExplainedSql.name(field.getName()));
+      }
+      Map<Integer, String> reached = new java.util.HashMap<>();
+      if (through == null) {
+        return new ExplainedSql.Row(fields, reached);
+      }
+
+      for (int k = 0; k < through.layout().entries().size(); k++) {
+        int at = through.offsets().get(k);
+        if (at < 0) {
+          continue;
+        }
+        ThroughEntry entry = through.layout().entries().get(k);
+        PathPlan path = entry.path();
+        ChalkTable keyed =
+            (path == null ? entry.parent() : path.base()).unwrap(ChalkTable.class);
+        String key =
+            keyed.descriptor().getColumns(path == null ? entry.parentColumn() : path.baseKey()).getName();
+        String column = table().descriptor().getColumns(entry.column()).getName();
+        put(fields, at, ExplainedSql.name(keyed.tableName(), key));
+        put(fields, at + 1, ExplainedSql.name(keyed.tableName(), key));
+        reached.put(at + 1, exists(keyed, key, column, path));
+
+        ChalkTable decided = path == null ? keyed : path.endpoint().unwrap(ChalkTable.class);
+        List<String> columns = new ArrayList<>();
+        for (var declared : decided.descriptor().getColumnsList()) {
+          columns.add(declared.getName());
+        }
+        ExplainedSql.Row parent = ExplainedSql.qualified(decided.tableName(), columns);
+        List<RexNode> verdicts = through.plan().verdicts().get(k);
+        for (int i = 0; i < verdicts.size(); i++) {
+          org.apache.calcite.sql.SqlNode verdict = ExplainedSql.tree(verdicts.get(i), parent);
+          if (verdict != null) {
+            put(fields, at + VerdictColumns.FIXED + i, verdict);
+          }
+        }
+        // A path predicate's endpoint columns, carried past the verdicts (D279 §4).
+        if (path != null) {
+          for (int i = 0; i < path.projected().size(); i++) {
+            put(
+                fields,
+                at + VerdictColumns.FIXED + through.verdicts() + i,
+                ExplainedSql.name(decided.tableName(), columns.get(path.projected().get(i))));
+          }
+        }
+      }
+      return new ExplainedSql.Row(fields, reached);
+    }
+
+    /**
+     * A path's predicates as the oracle says them: the endpoint's own row, its columns qualified;
+     * or, with {@code target}, the target's own columns by name and the endpoint's qualified from
+     * {@code block} on, as a path predicate reads them (D279 §4).
+     */
+    private static ExplainedSql.Row columnsOf(ChalkTable endpoint, @Nullable ChalkTable target, int block) {
+      List<org.apache.calcite.sql.SqlNode> fields = new ArrayList<>();
+      if (target != null) {
+        for (var declared : target.descriptor().getColumnsList()) {
+          fields.add(ExplainedSql.name(declared.getName()));
+        }
+      }
+      List<String> columns = new ArrayList<>();
+      for (var declared : endpoint.descriptor().getColumnsList()) {
+        columns.add(declared.getName());
+      }
+      List<org.apache.calcite.sql.SqlNode> qualified =
+          ExplainedSql.qualified(endpoint.tableName(), columns).fields();
+      for (int j = 0; j < qualified.size(); j++) {
+        put(fields, (target == null ? 0 : block) + j, qualified.get(j));
+      }
+      return new ExplainedSql.Row(fields, Map.of());
+    }
+
+    private static void put(
+        List<org.apache.calcite.sql.SqlNode> fields, int at, org.apache.calcite.sql.SqlNode node) {
+      while (fields.size() <= at) {
+        fields.add(ExplainedSql.name("$" + fields.size()));
+      }
+      fields.set(at, node);
+    }
+
+    /**
+     * That a row reaches a parent it is entitled through, or a path's first table, as SQL: a row of
+     * that table, as this principal sees it, holds the key the row names, along the path's route.
+     */
+    private static String exists(ChalkTable keyed, String key, String column, @Nullable PathPlan path) {
+      StringBuilder sql = new StringBuilder("EXISTS (SELECT 1 FROM ").append(ExplainedSql.text(keyed.tableName()));
+      if (path != null) {
+        ChalkTable at = keyed;
+        for (PathStep step : path.onward()) {
+          ChalkTable to = step.table().unwrap(ChalkTable.class);
+          sql.append(" JOIN ")
+              .append(ExplainedSql.text(to.tableName()))
+              .append(" ON ")
+              .append(ExplainedSql.text(to.tableName(), to.descriptor().getColumns(step.toColumn()).getName()))
+              .append(" = ")
+              .append(ExplainedSql.text(at.tableName(), at.descriptor().getColumns(step.fromColumn()).getName()));
+          at = to;
+        }
+      }
+      return sql.append(" WHERE ")
+          .append(ExplainedSql.text(keyed.tableName(), key))
+          .append(" = ")
+          .append(ExplainedSql.text(column))
+          .append(")")
+          .toString();
+    }
+
     /** The same for the declared paths (D265 §6): the route, the fold and the key it joins on. */
     List<ExplainedPath> explainedPaths() {
       if (through == null) {
@@ -399,8 +516,8 @@ public final class EntitlementPass {
                 endpoint.tableName(),
                 through.elided()[k],
                 through.dropped()[k],
-                path.endpointPredicate() == null ? "" : path.endpointPredicate().toString(),
-                path.pathPredicate() == null ? "" : path.pathPredicate().toString(),
+                ExplainedSql.render(path.endpointPredicate(), columnsOf(endpoint, null, 0)),
+                ExplainedSql.render(path.pathPredicate(), columnsOf(endpoint, from, path.endpointBlock())),
                 entry.column()));
       }
       return paths;

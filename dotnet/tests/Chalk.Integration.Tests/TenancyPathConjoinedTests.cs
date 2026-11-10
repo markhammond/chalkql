@@ -159,6 +159,13 @@ public sealed class TenancyPathConjoinedTests(SharedSidecar sidecar)
         var positions = Assert.Single(explained.Tables, t => t.Table == "positions");
         var path = Assert.Single(positions.Paths);
         Assert.Equal("supplier", path.Kind);
+        // The predicates name the endpoint's columns through it, and the target's own (F286).
+        Assert.Equal("products.supplier_id = 1", path.EndpointPredicate);
+        Assert.Equal("products.supplier_id = 1 AND warehouse_code = 'SIN'", path.PathPredicate);
+        Assert.Equal(
+            "products.supplier_id = 1 AND warehouse_code = 'SIN' "
+            + "AND EXISTS (SELECT 1 FROM products WHERE products.id = product_id)",
+            positions.RowPredicate);
         Assert.Equal("products", path.EndpointTable);
         Assert.False(path.Elided);
         Assert.False(path.Dropped);

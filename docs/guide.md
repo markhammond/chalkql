@@ -3322,6 +3322,13 @@ source for.
   - for each column: the folded disclosure (a name where folding settled it, or the
     conditions where it varies by row), the mask, the stand-in and the floor.
 
+  Every expression in it is ChalkQL SQL over the names you know, ready to show as it
+  comes: `MissionId IN ('KESTREL', 'SENTINEL')`, `WHEN created_by = 7 THEN FULL; ELSE
+  REDACTED`, `SUBSTRING(Assessment, 1, 1)`. A reserved name is quoted (`"Open"`). Another
+  table's column is `table.column`, a row reaching a parent or a path's tables is the
+  `EXISTS` that says so, and a context value left to execution is `@ctx.name`. The
+  expressions are the ones the plan enforces; only the way they are written is for people.
+
   Beside it, the report says when the statement asked for a tenancy *outside* the
   principal's scope, naming the column. An empty result and an empty table look the
   same, and this is how to tell them apart.

@@ -318,7 +318,13 @@ public sealed class ThroughTests(SharedSidecar sidecar)
         // Two occurrences of one parent, so the explanation names it twice, on its two keys.
         var explained = await engine.WithEntitlements()
             .ExplainAsync("SELECT id FROM pairings", Bind(Manager));
-        var parents = explained.Tables.Single(t => t.Table == "pairings").Parents;
+        var pairings = explained.Tables.Single(t => t.Table == "pairings");
+        // Reaching a parent is said as the EXISTS it is, over the names the policy wrote (F286).
+        Assert.Equal(
+            "EXISTS (SELECT 1 FROM threads WHERE threads.id = left_thread) "
+            + "OR EXISTS (SELECT 1 FROM threads WHERE threads.id = right_thread)",
+            pairings.RowPredicate);
+        var parents = pairings.Parents;
         Assert.Equal(["left_thread", "right_thread"], parents.Select(p => p.Column));
         Assert.All(parents, p => Assert.Equal("threads", p.Table));
         Assert.All(parents, p => Assert.Equal("id", p.ParentColumn));
