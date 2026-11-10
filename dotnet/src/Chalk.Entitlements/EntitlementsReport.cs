@@ -291,14 +291,24 @@ public sealed class ExplainedTable
     public required string Table { get; init; }
 
     /// <summary>
-    /// The folded row predicate as SQL text, or empty where it folded away and every row is visible.
+    /// The folded row predicate as ChalkQL SQL, or empty where it folded away and every row is
+    /// visible: <c>MissionId IN ('KESTREL', 'SENTINEL')</c>.
     /// </summary>
     /// <remarks>
-    /// A column reference <c>$n</c> reads this table's row. Where the table's visibility derives
-    /// through a parent (<see cref="Parents"/>), <c>$n</c> may reach past the table's own columns:
-    /// the row it reads is this table's columns, then each parent table's columns in turn, in the
-    /// order <see cref="Parents"/> first names them, and then each path's endpoint's. So on a child
-    /// of ten columns, <c>$10</c> is its parent's first column.
+    /// <para>
+    /// This table's columns are named as they are, and quoted where SQL reserves the name
+    /// (<c>"Open"</c>). Where the table's visibility derives through a parent (<see cref="Parents"/>)
+    /// or along a path (<see cref="Paths"/>), a row's reaching it is the <c>EXISTS</c> it is —
+    /// <c>EXISTS (SELECT 1 FROM threads WHERE threads.id = thread_id)</c> — and another table's
+    /// column is <c>table.column</c>. The tables in an <c>EXISTS</c> are read as this principal sees
+    /// them, which their own entries say. A context value the plan leaves to execution is
+    /// <c>@ctx.</c><i>name</i>, as a policy writes it.
+    /// </para>
+    /// <para>
+    /// The expression is the folded one the plan enforces; only how it is said is SQL. The same holds
+    /// for <see cref="Residual"/>, <see cref="ExplainedColumn"/>'s conditions, masks and stand-ins,
+    /// and a path's predicates.
+    /// </para>
     /// </remarks>
     public required string RowPredicate { get; init; }
 
@@ -361,11 +371,15 @@ public sealed class ExplainedPath
     /// </summary>
     public required bool Dropped { get; init; }
 
-    /// <summary>The endpoint predicate as SQL text, folded, or empty where it folded away.</summary>
+    /// <summary>
+    /// The endpoint predicate as ChalkQL SQL over the endpoint's columns, as <c>table.column</c>,
+    /// folded, or empty where it folded away.
+    /// </summary>
     public required string EndpointPredicate { get; init; }
 
     /// <summary>
-    /// The path predicate as SQL text, folded, or empty where the path carries none and where it
+    /// The path predicate as ChalkQL SQL, the entitled table's columns by name and the endpoint's as
+    /// <c>table.column</c>, folded, or empty where the path carries none and where it
     /// folded away. It is what a confinement conjoining this perspective with a kind the entitled
     /// table holds directly comes to, decided above the join over the two rows together.
     /// </summary>
@@ -448,17 +462,26 @@ public sealed class ExplainedColumn
 
     /// <summary>
     /// The folded disclosure: a constant name where the fold settled it for every row this principal
-    /// can see, and otherwise the folded rule conditions in order, as text. A rule whose condition
-    /// folds to one an earlier rule's already did is left out, since it can never be the first to
-    /// match. Column references read the row <see cref="ExplainedTable.RowPredicate"/> describes,
-    /// which for a table that derives its visibility through a parent runs on into the parent's.
+    /// can see, and otherwise the folded rule conditions in order, as
+    /// <c>WHEN &lt;condition&gt; THEN &lt;name&gt;; …; ELSE &lt;name&gt;</c>, each condition ChalkQL
+    /// SQL as <see cref="ExplainedTable.RowPredicate"/> is. A rule whose condition folds to one an
+    /// earlier rule's already did is left out, since it can never be the first to match.
     /// </summary>
     public required string Disclosure { get; init; }
 
-    /// <summary>The mask in place of the value, as text, where one is reachable.</summary>
+    /// <summary>
+    /// The mask in place of the value, as ChalkQL SQL, where one is reachable: a rule's own, else
+    /// the column's, as the plan chooses it. One mask that applies wherever the column is masked is
+    /// that mask (<c>SUBSTRING(Assessment, 1, 1)</c>); masks that vary by row are
+    /// <c>WHEN … THEN &lt;mask&gt;; …</c>; and none is empty, as where the column is in full.
+    /// </summary>
     public required string Mask { get; init; }
 
-    /// <summary>The stand-in for a redacted value, as text, where the descriptor declares one.</summary>
+    /// <summary>
+    /// The stand-in for a redacted value, as ChalkQL SQL, where the descriptor declares one: one
+    /// every row takes is that stand-in (<c>'withheld'</c>), and stand-ins that vary by row are
+    /// <c>WHEN … THEN &lt;stand-in&gt;; …</c>.
+    /// </summary>
     public required string Placeholder { get; init; }
 
     /// <summary>
