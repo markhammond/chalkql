@@ -1404,13 +1404,27 @@ Unquoted identifiers keep their case, but match regardless of case. Double quote
 an identifier exact. So `SELECT Symbol FROM Bars` finds a `symbol` column and names the
 output field `Symbol`, while `"symbol"` matches exactly.
 
-One trap: Calcite reserves a few SQL keywords that are ordinary .NET property names —
-**`OPEN` and `CLOSE` in particular**. A POCO with `Open` and `Close` properties needs
-them quoted:
+SQL reserves a few hundred words, among them ordinary .NET property and database names
+such as `Open`, `Close`, `At`, `Value`, `Year` and `national`
+([the list](../dotnet/src/Chalk.Entitlements.Tenancy/ReservedWords.txt)). You do not
+rename anything to suit it:
 
-```sql
-SELECT symbol, ts, "close" - "open" AS change FROM bars
-```
+- **A reserved word that names a schema, table or column is read as that name**, quoted
+  or not, in a statement and in a policy's conditions, masks and placeholders. Where the
+  parse stops at such a word, ChalkQL quotes it in the catalog's spelling and parses
+  again, so text that parsed before means what it meant.
+
+  ```sql
+  SELECT symbol, ts, close - open AS change FROM bars WHERE at > @since
+  ```
+- **The names ChalkQL writes into a policy itself**, such as a tenancy column in the row
+  predicate or a column filled into a mask template, are quoted where they need it.
+- **A reserved word that names nothing** is refused, saying so and how to quote it.
+- **A word SQL reads as a function without parentheses** (`USER`, `CURRENT_USER`,
+  `CURRENT_DATE`, `CURRENT_TIMESTAMP`, `LOCALTIME` and their kin) is the function wherever
+  it is written unquoted, so it never reaches a column of the same name. Where such a
+  column is in scope, the statement or condition is refused as ambiguous. Quote the name
+  to read the column: `WHERE "User" = 'ann'`.
 
 ## SQL dialect
 

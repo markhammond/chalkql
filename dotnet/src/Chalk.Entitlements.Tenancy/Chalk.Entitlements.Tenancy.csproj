@@ -27,6 +27,11 @@
     <InternalsVisibleTo Include="Chalk.Entitlements.Tenancy.Tests" />
   </ItemGroup>
 
+  <!-- The words SQL reserves, which a name the compiler writes is quoted for (SqlNames). -->
+  <ItemGroup>
+    <EmbeddedResource Include="ReservedWords.txt" LogicalName="Chalk.Entitlements.Tenancy.ReservedWords.txt" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" PrivateAssets="all" />
     <AdditionalFiles Include="PublicAPI.Shipped.txt" />
