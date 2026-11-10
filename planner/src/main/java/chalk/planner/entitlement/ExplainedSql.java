@@ -11,11 +11,13 @@ import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.rel2sql.SqlImplementor;
+import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
+import org.apache.calcite.rex.RexSimplify;
 import org.apache.calcite.rex.RexSubQuery;
 import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlIdentifier;
@@ -44,7 +46,16 @@ final class ExplainedSql {
    * How each position of the row a leaf's folded expressions read is said: an expression, and, for
    * a parent side's match marker, the {@code EXISTS} that its being non-null means.
    */
-  record Row(List<SqlNode> fields, Map<Integer, String> reached) {}
+  record Row(
+      List<SqlNode> fields,
+      Map<Integer, String> reached,
+      Map<Integer, RexNode> decided,
+      @Nullable RexSimplify simplify) {
+
+    Row(List<SqlNode> fields, Map<Integer, String> reached) {
+      this(fields, reached, Map.of(), null);
+    }
+  }
 
   /** A stand-in identifier for text spliced in after unparsing; no unquoted name can spell it. */
   private static final String SPLICE = chalk.planner.ReservedNames.PREFIX + "text";
@@ -138,8 +149,10 @@ final class ExplainedSql {
 
   private static SqlNode node(RexNode rex, Row row, List<String> spliced) {
     int width = row.fields().size();
+    // The verdicts are put in place once, here; a key rendered on its own inside is past that.
+    Row placed = new Row(row.fields(), row.reached());
     RexNode said =
-        rex.accept(
+        decided(rex, row).accept(
             new RexShuttle() {
               @Override
               public RexNode visitCall(RexCall call) {
@@ -155,7 +168,7 @@ final class ExplainedSql {
                 if (ChalkContextMembership.is(call)) {
                   List<String> keys = new ArrayList<>();
                   for (RexNode key : call.getOperands().subList(1, call.getOperands().size())) {
-                    keys.add(render(key, row));
+                    keys.add(render(key, placed));
                   }
                   return splice(call, membership(keys, ChalkContextMembership.list(call)));
                 }
@@ -173,7 +186,7 @@ final class ExplainedSql {
                 if (subQuery.getKind() == SqlKind.IN && list != null) {
                   List<String> keys = new ArrayList<>();
                   for (RexNode key : subQuery.getOperands()) {
-                    keys.add(render(key, row));
+                    keys.add(render(key, placed));
                   }
                   return splice(subQuery, membership(keys, list));
                 }
@@ -198,6 +211,88 @@ final class ExplainedSql {
                         List.of(SqlParserPos.QUOTED_ZERO, SqlParserPos.QUOTED_ZERO))
                     : i < width ? row.fields().get(i) : name("$" + i));
     return context.toSql(null, said);
+  }
+
+  /**
+   * The expression with each verdict a parent decided put in its place, over the parent's own
+   * columns, and simplified: a child reads a verdict as a code, as in {@code COALESCE(CASE WHEN
+   * activities.site_id = 1 THEN 1 ELSE 2 END, 2) = 1}, which says no more than {@code
+   * activities.site_id = 1}. Read as the pass reads a condition, an unknown as false. Where no
+   * verdict is read, the expression is as it was.
+   */
+  private static RexNode decided(RexNode rex, Row row) {
+    if (row.decided().isEmpty() || row.simplify() == null) {
+      return rex;
+    }
+    RexBuilder builder = row.simplify().rexBuilder;
+    boolean[] read = {false};
+    RexNode substituted =
+        rex.accept(
+            new RexShuttle() {
+              @Override
+              public RexNode visitInputRef(RexInputRef ref) {
+                RexNode verdict = row.decided().get(ref.getIndex());
+                if (verdict == null) {
+                  return ref;
+                }
+                read[0] = true;
+                return builder.ensureType(ref.getType(), verdict, true);
+              }
+            });
+    if (!read[0]) {
+      return rex;
+    }
+    if (substituted.getType().getSqlTypeName() != org.apache.calcite.sql.type.SqlTypeName.BOOLEAN) {
+      return row.simplify().simplifyPreservingType(substituted);
+    }
+    RexNode simplified = row.simplify().simplifyUnknownAsFalse(substituted);
+    return row.simplify().simplifyUnknownAsFalse(intoBranches(simplified, builder));
+  }
+
+  /**
+   * Each comparison of a {@code CASE} with a literal, put into the branches: {@code CASE WHEN c1
+   * THEN 1 WHEN c2 THEN 2 ELSE 3 END = 2} is {@code CASE WHEN c1 THEN FALSE WHEN c2 THEN TRUE ELSE
+   * FALSE END}, which the simplifier then says as the conditions it comes to. That is the shape a
+   * verdict decided as the number of the first rule that holds takes once it is in place.
+   */
+  private static RexNode intoBranches(RexNode rex, RexBuilder builder) {
+    return rex.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitCall(RexCall call) {
+            RexCall visited = (RexCall) super.visitCall(call);
+            if (!visited.isA(SqlKind.COMPARISON) || visited.getOperands().size() != 2) {
+              return visited;
+            }
+            RexNode left = visited.getOperands().get(0);
+            RexNode right = visited.getOperands().get(1);
+            if (left.isA(SqlKind.CASE) && right instanceof RexLiteral) {
+              return branches((RexCall) left, right, visited, true);
+            }
+            if (right.isA(SqlKind.CASE) && left instanceof RexLiteral) {
+              return branches((RexCall) right, left, visited, false);
+            }
+            return visited;
+          }
+
+          private RexNode branches(RexCall cases, RexNode literal, RexCall comparison, boolean caseFirst) {
+            List<RexNode> operands = new ArrayList<>(cases.getOperands().size());
+            List<RexNode> given = cases.getOperands();
+            for (int i = 0; i < given.size(); i++) {
+              boolean value = i % 2 == 1 || i == given.size() - 1;
+              if (!value) {
+                operands.add(given.get(i));
+                continue;
+              }
+              operands.add(
+                  builder.makeCall(
+                      comparison.getOperator(),
+                      caseFirst ? given.get(i) : literal,
+                      caseFirst ? literal : given.get(i)));
+            }
+            return builder.makeCall(org.apache.calcite.sql.fun.SqlStdOperatorTable.CASE, operands);
+          }
+        });
   }
 
   private static String unparse(SqlNode node) {

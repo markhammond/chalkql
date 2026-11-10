@@ -371,6 +371,10 @@ public final class EntitlementPass {
       if (through == null) {
         return new ExplainedSql.Row(fields, reached);
       }
+      // Each side's verdicts, to put in place over the parent's columns once every position of the
+      // joined row is named: the parent's columns go past them.
+      List<Map.Entry<Integer, ExplainedSql.Row>> sides = new ArrayList<>();
+      List<List<RexNode>> sideVerdicts = new ArrayList<>();
 
       for (int k = 0; k < through.layout().entries().size(); k++) {
         int at = through.offsets().get(k);
@@ -395,6 +399,8 @@ public final class EntitlementPass {
         }
         ExplainedSql.Row parent = ExplainedSql.qualified(decided.tableName(), columns);
         List<RexNode> verdicts = through.plan().verdicts().get(k);
+        sides.add(Map.entry(at + VerdictColumns.FIXED, parent));
+        sideVerdicts.add(verdicts);
         for (int i = 0; i < verdicts.size(); i++) {
           org.apache.calcite.sql.SqlNode verdict = ExplainedSql.tree(verdicts.get(i), parent);
           if (verdict != null) {
@@ -411,7 +417,24 @@ public final class EntitlementPass {
           }
         }
       }
-      return new ExplainedSql.Row(fields, reached);
+
+      Map<Integer, RexNode> decidedBy = new java.util.HashMap<>();
+      for (int s = 0; s < sides.size(); s++) {
+        int base = fields.size();
+        fields.addAll(sides.get(s).getValue().fields());
+        List<RexNode> verdicts = sideVerdicts.get(s);
+        for (int i = 0; i < verdicts.size(); i++) {
+          decidedBy.put(sides.get(s).getKey() + i, org.apache.calcite.rex.RexUtil.shift(verdicts.get(i), base));
+        }
+      }
+      return new ExplainedSql.Row(
+          fields,
+          reached,
+          decidedBy,
+          new RexSimplify(
+              underFilter.rexBuilder,
+              org.apache.calcite.plan.RelOptPredicateList.EMPTY,
+              org.apache.calcite.rex.RexUtil.EXECUTOR));
     }
 
     /**
