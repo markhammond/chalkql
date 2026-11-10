@@ -289,13 +289,14 @@ public sealed class TenancyPrincipal
     public int FoldMaxRows { get; init; }
 
     /// <summary>
-    /// Context lists and scalars the host computes itself, for a table in
-    /// <see cref="TenancyMode.Custom"/> whose predicate names them.
+    /// Context lists the host computes itself, for a predicate of its own
+    /// (<see cref="TenancyRestrictions.Predicate(Sql)"/>) or an access rule's <c>When</c> that names
+    /// them as <c>@ctx.</c><i>name</i>.
     /// </summary>
     public IReadOnlyDictionary<string, ContextRelation> CustomLists { get; init; } =
         new Dictionary<string, ContextRelation>(StringComparer.Ordinal);
 
-    /// <summary>The same for scalars a custom predicate names.</summary>
+    /// <summary>The same for scalars such a predicate or condition names.</summary>
     public IReadOnlyDictionary<string, object?> CustomScalars { get; init; } =
         new Dictionary<string, object?>(StringComparer.Ordinal);
 }

@@ -128,10 +128,12 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
 - A view may build a new plan beside the one it runs, from the moment its statement takes the plan,
   and swap it in once built (`ViewOptions.PlanSwap = ViewPlanSwap.LowJitter`), so that no update
   computes it from nothing.
-- Joins (inner and left), as-of joins, aggregates with grouping sets, filters, projections,
-  `UNION ALL`, `VALUES` and `WITH` subtrees are maintained, the clock in a filter or a projection,
-  and an index lookup pinned to keys, as a constant key or an `IN` list makes, which is read as its
-  table is, kept to those keys.
+- Joins (inner, left, and right as the left join it mirrors), semi and anti joins, as-of joins,
+  aggregates with grouping sets, filters, projections, `UNION ALL`, `VALUES` and `WITH` subtrees are
+  maintained, and so are the clock in a filter or a projection, `ORDER BY … LIMIT` at the
+  statement's end with an `OFFSET`, and a window function whose frames one change can move only so
+  many rows of. An index lookup pinned to keys, as a constant key or an `IN` list makes, is read as
+  its table is, kept to those keys; one over a range is kept as a filter over the table.
 - An as-of join that seeks an index keeps only its left rows and the rows they match, never the
   table's, so its state does not grow with the table's history; it keeps each key's last row too,
   so a row at the clock needs no seek.
@@ -140,10 +142,22 @@ await using var view = await engine.MaterializeAsync(sql, new ViewOptions<CellKe
 - What the statement keeps counts in `StateBytes`, against `StateBudget`.
 - An update that fails part way leaves the next to start from nothing; readers get only the keys
   that differ.
-- A statement maintenance does not keep — window functions, `LIMIT`, set operations but `UNION ALL`,
-  right, full, semi and anti joins, `DISTINCT` and ordered aggregates, an index lookup over a range
-  of keys, the reference executor — is refused when the view is made, with `UnsupportedInView`,
-  naming it.
+- A statement maintenance does not keep is refused when the view is made, with `UnsupportedInView`,
+  naming the operator and where it is in the plan:
+  - a window function that one change could move every row of, or that a tie decides;
+  - a `LIMIT` before the statement's last step;
+  - set operations but `UNION ALL`;
+  - full joins;
+  - `DISTINCT`, ordered, holistic and host aggregates;
+  - an as-of join whose right input is not a table read, or a lookup of one key in the table's
+    order, through filters and projections;
+  - an as-of seek whose key has one type in its table and another on its left;
+  - the clock in a join's condition;
+  - a source outside the engine's epochs;
+  - a `LIST`, composite or `BINARY` value in what an operator keeps;
+  - the reference executor.
+
+  A view that recomputes takes all of them.
 
 ## Inputs
 
