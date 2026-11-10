@@ -34,7 +34,7 @@ public sealed class ExplainEntitlementsTests(SharedSidecar sidecar)
 
         var members = Assert.Single(explained.Tables, t => t.Table == "members");
         Assert.Equal("main", members.Schema);
-        Assert.Contains("$1", members.RowPredicate, StringComparison.Ordinal);
+        Assert.Equal("org_id IN (1, 2)", members.RowPredicate);
 
         // A local table has no source to push into, so the whole predicate is the residual.
         Assert.False(members.RowPredicatePushed);
