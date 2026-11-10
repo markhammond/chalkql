@@ -23,14 +23,16 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.6.3 makes keyed views lighter: a maintained view's result holds one slot per key, and none beyond its identity map when the key is the whole row.
+      ChalkQL 0.7.0 makes the entitlements explanation readable as it comes, lets a schema keep names SQL reserves, and gives the engine's clock to every way of running a statement.
 
-      - **Keyed views:** the result's key index maps each key to one slot rather than a list, and a whole-row key uses the identity map as its index. A view of keys alone holds about 40% less: about 175 B a row where it held 330, in one host's measurements. Counts grow by half again rather than doubling. A key given two rows still faults the view, coded `DeclarationNotHeld`.
-      - **Refresh rows:** `RefreshBuilder` now says what becomes of the rows it is given. A POCO `Replace` holds the collection and reports it through `PocoSource.SnapshotReleased`; `Upsert` and `Delete` read their lists while the refresh runs and hold nothing after `RefreshAsync` returns. The behaviour is unchanged.
-      - **Compatibility:** no change to the API, the protocol or the IR. A 0.6.2 planner serves a 0.6.3 client, and a 0.6.3 planner serves a 0.6.2 client.
+      - **Explanation as SQL:** `ExplainAsync` writes its expressions over column names: `MissionId IN ('KESTREL', 'SENTINEL')` rather than `SEARCH($1, Sarg[...])`. Reserved names are quoted, another table's column is `table.column`, a parent or path is the `EXISTS` that says so, open context is `@ctx.name`, and a conjunction under a disjunction is parenthesised. The expressions are unchanged; their text is not.
+      - **The mask that applies:** `ExplainedColumn.Mask` is a rule's own mask, else the column's, and empty where the column is in full.
+      - **Reserved words as names:** a column, table or schema named `Open`, `At`, `Value` or `national` works unquoted, in statements and policies, and the policy compiler quotes the names it writes. An unquoted `USER`, `CURRENT_DATE` or kin naming a column in scope is refused as ambiguous.
+      - **`@now` on every path:** on an engine with a clock, an unbound `@now` is the clock however a statement is run, with a list, no values or a principal's context. A list one value short leaves it to the clock.
+      - **Compatibility:** no change to the API surface, the protocol or the IR, and 0.6.3 and 0.7.0 planners and clients interoperate. The explanation's text changes form, and an empty parameter list for a statement with parameters is now refused.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.6.3
+      https://github.com/markhammond/chalkql/releases/tag/v0.7.0
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>

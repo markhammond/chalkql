@@ -13,12 +13,12 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL.Sources 0.6.3 accompanies ChalkQL 0.6.3, with no changes of its own.
+      ChalkQL.Sources 0.7.0 accompanies ChalkQL 0.7.0, with no changes of its own.
 
-      Requires exactly ChalkQL 0.6.3.
+      Requires exactly ChalkQL 0.7.0.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.6.3
+      https://github.com/markhammond/chalkql/releases/tag/v0.7.0
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
