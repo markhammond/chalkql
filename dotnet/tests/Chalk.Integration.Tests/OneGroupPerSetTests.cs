@@ -127,7 +127,7 @@ public sealed class OneGroupPerSetTests(SharedSidecar sidecar) : IDisposable
         Assert.Equal(1, answer.Filled);
         if (run == Run.BoundAtPrepare)
         {
-            Assert.Single(Regex.Matches(answer.Folded!, @"AND\("));
+            Assert.Equal("K1 = 'a' AND K2 = 'b' AND K3 = 'c'", answer.Folded);
         }
     }
 

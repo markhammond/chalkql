@@ -297,6 +297,33 @@ public sealed class ThroughTests(SharedSidecar sidecar)
             reconciled.Visibility.Single(v => v.Table == "links").Verdict);
     }
 
+    // ------------------------------------------------------------------ the explanation's verdicts
+
+    /// <summary>
+    /// A child's rule decided on its parent is explained as the condition it is over the parent's
+    /// columns (F286): a manager in one organisation and an agent in another sees a message's
+    /// content in full under the first and masked under the second, said as the threads' own
+    /// <c>org_id</c> rather than as the code the child reads.
+    /// </summary>
+    [Fact]
+    public async Task A_rule_decided_on_the_parent_is_explained_over_its_columns()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var engine = await EngineAsync();
+        var mixed = new TenancyPrincipal
+        {
+            User = 3,
+            MaskKey = "k",
+            Grants = [Grant.ForTenancy(OrgKind, 1, ManagerRole), Grant.ForTenancy(OrgKind, 2, Handles.Role("agent"))],
+        };
+
+        var explained = await engine.WithEntitlements().ExplainAsync("SELECT id, content FROM messages", Bind(mixed));
+
+        var content = explained.Tables.Single(t => t.Table == "messages").Columns.Single(c => c.Column == "content");
+        Assert.Equal("WHEN threads.org_id = 1 THEN FULL; WHEN threads.org_id = 2 THEN MASKED; ELSE REDACTED", content.Disclosure);
+        Assert.Equal("SUBSTRING(content, 1, 5)", content.Mask);
+    }
+
     // ------------------------------------------------------------------ one parent, two columns
 
     /// <summary>
@@ -318,7 +345,13 @@ public sealed class ThroughTests(SharedSidecar sidecar)
         // Two occurrences of one parent, so the explanation names it twice, on its two keys.
         var explained = await engine.WithEntitlements()
             .ExplainAsync("SELECT id FROM pairings", Bind(Manager));
-        var parents = explained.Tables.Single(t => t.Table == "pairings").Parents;
+        var pairings = explained.Tables.Single(t => t.Table == "pairings");
+        // Reaching a parent is said as the EXISTS it is, over the names the policy wrote (F286).
+        Assert.Equal(
+            "EXISTS (SELECT 1 FROM threads WHERE threads.id = left_thread) "
+            + "OR EXISTS (SELECT 1 FROM threads WHERE threads.id = right_thread)",
+            pairings.RowPredicate);
+        var parents = pairings.Parents;
         Assert.Equal(["left_thread", "right_thread"], parents.Select(p => p.Column));
         Assert.All(parents, p => Assert.Equal("threads", p.Table));
         Assert.All(parents, p => Assert.Equal("id", p.ParentColumn));
