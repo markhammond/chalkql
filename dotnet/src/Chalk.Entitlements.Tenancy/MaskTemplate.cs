@@ -177,7 +177,7 @@ internal static class MaskTemplate
                 var qualified = start > 0 && body[start - 1] == '.';
                 text.Append(
                     !qualified && string.Equals(token, parameter, StringComparison.OrdinalIgnoreCase)
-                        ? column
+                        ? SqlNames.Of(column)
                         : token);
                 continue;
             }

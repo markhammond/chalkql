@@ -2730,7 +2730,7 @@ internal static class TenancyCompiler
             return "";
         }
 
-        return AcrossRoles(model, declaredPath, declaredPath.EndpointTable + ".", crossRow, admission: false);
+        return AcrossRoles(model, declaredPath, SqlNames.Of(declaredPath.EndpointTable) + ".", crossRow, admission: false);
     }
 
     /// <summary>Whether any role's groups for this path's dimension read both rows (D279 §2).</summary>
@@ -3039,7 +3039,7 @@ internal static class TenancyCompiler
                     break;
 
                 default:
-                    Or(predicate, $"{restriction.Column} = @ctx.user");
+                    Or(predicate, $"{SqlNames.Of(restriction.Column)} = @ctx.user");
                     break;
             }
         }
@@ -3101,7 +3101,7 @@ internal static class TenancyCompiler
                     parts,
                     dimension,
                     role,
-                    parent.ParentTable + ".",
+                    SqlNames.Of(parent.ParentTable) + ".",
                     parent.ParentDimensions,
                     model.Rules);
             }
@@ -3124,7 +3124,7 @@ internal static class TenancyCompiler
                 along,
                 declaredPath.EndpointDimension,
                 role,
-                declaredPath.EndpointTable + ".",
+                SqlNames.Of(declaredPath.EndpointTable) + ".",
                 declaredPath.EndpointDimensions,
                 model.Rules,
                 CrossRow(model, declaredPath),
@@ -3163,7 +3163,7 @@ internal static class TenancyCompiler
         {
             if (group.Confining.Count == 0)
             {
-                parts.Add($"{qualifier}{dimension.Column} IN (@ctx.{group.Name})");
+                parts.Add($"{qualifier}{SqlNames.Of(dimension.Column)} IN (@ctx.{group.Name})");
                 continue;
             }
 
@@ -3172,15 +3172,15 @@ internal static class TenancyCompiler
             // the path predicate finishes the check above the join.
             if (group.IsCrossRow && admission)
             {
-                parts.Add($"{qualifier}{dimension.Column} IN (@ctx.{Derived(group)})");
+                parts.Add($"{qualifier}{SqlNames.Of(dimension.Column)} IN (@ctx.{Derived(group)})");
                 continue;
             }
 
             var columns = string.Join(
                 ", ",
-                new[] { qualifier + dimension.Column }
+                new[] { qualifier + SqlNames.Of(dimension.Column) }
                     .Concat(group.Confining.Select(
-                        c => (c.OnTarget ? "" : qualifier) + c.Dimension.Column)));
+                        c => (c.OnTarget ? "" : qualifier) + SqlNames.Of(c.Dimension.Column))));
             parts.Add($"({columns}) IN (@ctx.{group.Name})");
         }
     }
@@ -3362,7 +3362,7 @@ internal static class TenancyCompiler
             {
                 rules.Add(new DisclosureRule
                 {
-                    When = $"{declared.ResourceOwnerColumn} = @ctx.user",
+                    When = $"{SqlNames.Of(declared.ResourceOwnerColumn)} = @ctx.user",
                     Then = Disclosure.Full,
                 });
                 continue;
@@ -3516,7 +3516,7 @@ internal static class TenancyCompiler
         {
             parts.Add(
                 role == Roles.Owner
-                    ? $"{declared.ResourceOwnerColumn} = @ctx.user"
+                    ? $"{SqlNames.Of(declared.ResourceOwnerColumn)} = @ctx.user"
                     : Scope(model, role.Name, derived: true));
         }
 

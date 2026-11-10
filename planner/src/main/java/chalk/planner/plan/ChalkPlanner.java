@@ -7,6 +7,7 @@ import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
 import java.io.Reader;
+import java.util.ArrayList;
 import java.util.List;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
 import org.apache.calcite.config.CalciteConnectionConfig;
@@ -239,50 +240,121 @@ public final class ChalkPlanner implements Planner, RelOptTable.ViewExpander {
         break;
     }
     ensure(State.STATE_2_READY);
-    SqlParser parser = SqlParser.create(reader, parserConfig);
-    SqlNode sqlNode;
-    try {
-      sqlNode = parser.parseStmt();
-    } catch (SqlParseException e) {
-      throw namingReservedWord(e);
+    String sql = read(reader);
+    SqlNode sqlNode =
+        ReservedWords.parse(
+                sql,
+                parserConfig,
+                this::catalogName,
+                text -> SqlParser.create(text, parserConfig).parseStmt())
+            .node();
+    String ambiguous = ReservedWords.ambiguity(sqlNode, word -> columnOfNamedTable(sqlNode, word));
+    if (ambiguous != null) {
+      throw new SqlParseException(ambiguous + ".", sqlNode.getParserPosition(), null, null, null);
     }
     state = State.STATE_3_PARSED;
     return sqlNode;
   }
 
-  private static final java.util.regex.Pattern ENCOUNTERED =
-      java.util.regex.Pattern.compile("Encountered \"(?:[^\"]*\\s)?([A-Za-z_][A-Za-z0-9_]*)\"");
+  private static String read(Reader reader) throws SqlParseException {
+    try {
+      StringBuilder text = new StringBuilder();
+      char[] buffer = new char[4096];
+      for (int n; (n = reader.read(buffer)) >= 0; ) {
+        text.append(buffer, 0, n);
+      }
+      return text.toString();
+    } catch (java.io.IOException e) {
+      throw new SqlParseException(
+          "the statement could not be read: " + e.getMessage(), null, null, null, e);
+    }
+  }
 
   /**
-   * A parse that stopped at a reserved word used as a name, as in {@code SELECT … AS at}, says so
-   * and how to quote it, before the parser's own message: the parser names only the token it met
-   * and the many it expected.
+   * A schema's, table's or column's name anywhere in the catalog, in the catalog's spelling, matched
+   * without regard to case; or null where it names none. What a reserved word is quoted as.
    */
-  private SqlParseException namingReservedWord(SqlParseException e) {
-    String message = e.getMessage();
-    java.util.regex.Matcher encountered = message == null ? null : ENCOUNTERED.matcher(message);
-    if (encountered == null || !encountered.find()) {
-      return e;
-    }
+  private @Nullable String catalogName(String word) {
+    return catalogName(CalciteSchema.from(rootSchema(requireNonNull(defaultSchema, "defaultSchema"))), word);
+  }
 
-    String word = encountered.group(1);
-    boolean reserved =
-        parserConfig
-            .parserFactory()
-            .getParser(new java.io.StringReader(""))
-            .getMetadata()
-            .isReservedWord(word.toUpperCase(java.util.Locale.ROOT));
-    if (!reserved) {
-      return e;
+  private @Nullable String catalogName(CalciteSchema schema, String word) {
+    for (var sub : schema.getSubSchemaMap().entrySet()) {
+      if (sub.getKey().equalsIgnoreCase(word)) {
+        return sub.getKey();
+      }
+      String found = catalogName(sub.getValue(), word);
+      if (found != null) {
+        return found;
+      }
     }
+    for (String table : schema.getTableNames()) {
+      if (table.equalsIgnoreCase(word)) {
+        return table;
+      }
+      String column = column(schema, table, word);
+      if (column != null) {
+        return column;
+      }
+    }
+    return null;
+  }
 
-    return new SqlParseException(
-        "'" + word + "' is a reserved word: to use it as a name, quote it as \"" + word + "\". "
-            + message,
-        e.getPos(),
-        e.getExpectedTokenSequences(),
-        e.getTokenImages(),
-        e.getCause());
+  /**
+   * A column, matched without regard to case, of a catalog table this statement names; or null.
+   * A table is taken as named where an identifier ends in its name, or in its schema's and its own.
+   */
+  private @Nullable String columnOfNamedTable(SqlNode statement, String word) {
+    List<List<String>> identifiers = new ArrayList<>();
+    statement.accept(
+        new org.apache.calcite.sql.util.SqlBasicVisitor<Void>() {
+          @Override
+          public Void visit(org.apache.calcite.sql.SqlIdentifier id) {
+            identifiers.add(id.names);
+            return null;
+          }
+        });
+    return columnOfNamedTable(
+        CalciteSchema.from(rootSchema(requireNonNull(defaultSchema, "defaultSchema"))), identifiers, word);
+  }
+
+  private @Nullable String columnOfNamedTable(
+      CalciteSchema schema, List<List<String>> identifiers, String word) {
+    for (var sub : schema.getSubSchemaMap().values()) {
+      String found = columnOfNamedTable(sub, identifiers, word);
+      if (found != null) {
+        return found;
+      }
+    }
+    for (String table : schema.getTableNames()) {
+      for (List<String> names : identifiers) {
+        int n = names.size();
+        boolean named =
+            n > 0
+                && names.get(n - 1).equalsIgnoreCase(table)
+                && (n == 1 || names.get(n - 2).equalsIgnoreCase(schema.getName()));
+        if (named) {
+          String column = column(schema, table, word);
+          if (column != null) {
+            return column;
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  private @Nullable String column(CalciteSchema schema, String table, String word) {
+    CalciteSchema.TableEntry entry = schema.getTable(table, true);
+    if (entry == null) {
+      return null;
+    }
+    for (String column : entry.getTable().getRowType(requireNonNull(typeFactory, "typeFactory")).getFieldNames()) {
+      if (column.equalsIgnoreCase(word)) {
+        return column;
+      }
+    }
+    return null;
   }
 
   @Override

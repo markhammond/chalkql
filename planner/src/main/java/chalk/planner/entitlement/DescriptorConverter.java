@@ -113,6 +113,67 @@ public final class DescriptorConverter {
     }
   }
 
+  /**
+   * A column of one of these tables, matched without regard to case, in the catalog's spelling;
+   * with {@code tablesToo}, the tables' and their schemas' names as well. Null where none matches.
+   */
+  private @Nullable String name(List<List<String>> tables, String word, boolean tablesToo) {
+    for (List<String> table : tables) {
+      if (tablesToo) {
+        for (String part : table) {
+          if (part.equalsIgnoreCase(word)) {
+            return part;
+          }
+        }
+      }
+      var resolved = catalogReader.getTable(table);
+      if (resolved == null) {
+        continue;
+      }
+      for (String column : resolved.getRowType().getFieldNames()) {
+        if (column.equalsIgnoreCase(word)) {
+          return column;
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Which of the expressions does not parse, as {@code  in `<expression>`}, where one alone does
+   * not; empty where each parses alone and only their combination fails.
+   */
+  private String culprit(List<String> exprs, List<List<String>> tables, String where) {
+    for (String expr : exprs) {
+      StringBuilder sql = new StringBuilder("SELECT ").append(expr).append(" FROM ");
+      appendQualified(sql, tables.get(0));
+      for (List<String> parent : tables.subList(1, tables.size())) {
+        sql.append(", ");
+        appendQualified(sql, parent);
+      }
+      try {
+        chalk.planner.plan.ReservedWords.parse(
+            rewriteContext(sql.toString(), where),
+            parserConfig,
+            word -> name(tables, word, true),
+            t -> SqlParser.create(t, parserConfig).parseQuery());
+      } catch (org.apache.calcite.sql.parser.SqlParseException | RuntimeException e) {
+        return " in `" + expr + "`";
+      }
+    }
+    return "";
+  }
+
+  /**
+   * A parser message without its line and column: they count in the statement the converter
+   * writes around the host's expressions, not in anything the host wrote.
+   */
+  private static String withoutPosition(@Nullable String message) {
+    return message == null
+        ? ""
+        : message.replaceAll(" at line \\d+, column \\d+(?: to line \\d+, column \\d+)?", "");
+  }
+
   /** The type factory these expressions are built over — the query's own cluster's. */
   public RelDataTypeFactory typeFactory() {
     return cluster.getTypeFactory();
@@ -193,18 +254,35 @@ public final class DescriptorConverter {
 
     String text = rewriteContext(sql.toString(), where);
 
+    // A reserved word that names one of these tables or their columns is quoted for the host, as
+    // in a statement (ReservedNames); the policy compiler quotes the names it writes itself.
+    List<List<String>> tables = ImmutableList.<List<String>>builder().add(qualified).addAll(parents).build();
     SqlNode parsed;
     try {
-      parsed = SqlParser.create(text, parserConfig).parseQuery();
+      parsed =
+          chalk.planner.plan.ReservedWords.parse(
+                  text,
+                  parserConfig,
+                  word -> name(tables, word, true),
+                  t -> SqlParser.create(t, parserConfig).parseQuery())
+              .node();
     } catch (org.apache.calcite.sql.parser.SqlParseException e) {
       throw new PolicyException(
           ErrorCode.INVALID_ENTITLEMENT,
           "the entitlement on "
               + where
-              + " does not parse: "
-              + e.getMessage()
+              + " does not parse"
+              + culprit(exprs, tables, where)
+              + ": "
+              + withoutPosition(e.getMessage())
               + ". Its row predicate, rule conditions, masks and placeholders are SQL in Chalk's own"
               + " dialect over the table's columns and @ctx names.");
+    }
+    String ambiguous = chalk.planner.plan.ReservedWords.ambiguity(parsed, word -> name(tables, word, false));
+    if (ambiguous != null) {
+      throw new PolicyException(
+          ErrorCode.INVALID_ENTITLEMENT,
+          "the entitlement on " + where + " is ambiguous: " + withoutPosition(ambiguous) + ".");
     }
 
     ContextFold.Folded folded =
