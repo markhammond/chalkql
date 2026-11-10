@@ -19,10 +19,14 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexSimplify;
 import org.apache.calcite.rex.RexSubQuery;
+import org.apache.calcite.sql.SqlCall;
 import org.apache.calcite.sql.SqlDialect;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlNode;
+import org.apache.calcite.sql.SqlSpecialOperator;
+import org.apache.calcite.sql.SqlWriter;
+import org.apache.calcite.sql.util.SqlShuttle;
 import org.apache.calcite.sql.parser.SqlAbstractParserImpl;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.parser.impl.SqlParserImpl;
@@ -295,8 +299,43 @@ final class ExplainedSql {
         });
   }
 
+  /**
+   * Writes a conjunction under a disjunction in parentheses: {@code (a AND b) OR (c AND d)} rather
+   * than {@code a AND b OR c AND d}, which reads the same to the parser and not to every reader. A
+   * disjunction under a conjunction is parenthesised already, by precedence.
+   */
+  private static final SqlSpecialOperator GROUPED =
+      new SqlSpecialOperator("GROUPED", SqlKind.OTHER, 100) {
+        @Override
+        public void unparse(SqlWriter writer, SqlCall call, int leftPrec, int rightPrec) {
+          SqlWriter.Frame frame = writer.startList("(", ")");
+          call.operand(0).unparse(writer, 0, 0);
+          writer.endList(frame);
+        }
+      };
+
+  private static final SqlShuttle GROUPING =
+      new SqlShuttle() {
+        @Override
+        public @Nullable SqlNode visit(SqlCall call) {
+          SqlNode visited = super.visit(call);
+          if (!(visited instanceof SqlCall or) || or.getKind() != SqlKind.OR) {
+            return visited;
+          }
+          List<SqlNode> operands = new ArrayList<>(or.operandCount());
+          for (SqlNode operand : or.getOperandList()) {
+            operands.add(
+                operand != null && operand.getKind() == SqlKind.AND
+                    ? GROUPED.createCall(SqlParserPos.ZERO, operand)
+                    : operand);
+          }
+          return or.getOperator().createCall(SqlParserPos.ZERO, operands);
+        }
+      };
+
   private static String unparse(SqlNode node) {
-    return node.toSqlString(
+    SqlNode grouped = node.accept(GROUPING);
+    return (grouped == null ? node : grouped).toSqlString(
             c ->
                 c.withDialect(DIALECT)
                     .withQuoteAllIdentifiers(false)
