@@ -90,7 +90,7 @@ public final class PolicyExplain {
           new Column(
               rowType.getFieldList().get(i).getName(),
               disclosure(fold, i, entitled),
-              entitled == null || entitled.mask() == null ? "" : entitled.mask().toString(),
+              mask(fold, i, entitled),
               placeholder(fold, i, entitled),
               floor(fold, i, entitled, options)));
     }
@@ -203,6 +203,49 @@ public final class PolicyExplain {
       return 0;
     }
     return options.minGroupSize(entitled.minGroupSize());
+  }
+
+  /**
+   * The mask this principal's rows take where this column is masked, as the rewrite chooses it: a
+   * rule's own mask, else the column's (§3.2). One mask that applies wherever the column is masked is
+   * that mask; masks that vary by row are the reachable masking rules in order, in the {@code WHEN …
+   * THEN …} shape the disclosure uses; and none is empty, as where the fold leaves the column full.
+   */
+  private static String mask(
+      EntitlementPass.LeafFold fold, int column, DescriptorExpressions.@Nullable Column entitled) {
+    EntitlementPass.Reachable reachable = fold.reachable().get(column);
+    if (entitled == null || reachable == null) {
+      return "";
+    }
+
+    List<String> conditions = new ArrayList<>();
+    List<String> masks = new ArrayList<>();
+    for (int i = 0; i < reachable.rules().size(); i++) {
+      int rule = reachable.rules().get(i);
+      RexNode mask = entitled.maskOf(rule);
+      if (entitled.rules().get(rule).getThen() == Disclosure.DISCLOSURE_MASKED && mask != null) {
+        RexNode condition = reachable.conditions().get(i);
+        conditions.add(condition.isAlwaysTrue() ? "" : condition.toString());
+        masks.add(mask.toString());
+      }
+    }
+    if (reachable.otherwiseReachable()
+        && reachable.otherwise() == Disclosure.DISCLOSURE_MASKED
+        && entitled.mask() != null) {
+      conditions.add("");
+      masks.add(entitled.mask().toString());
+    }
+
+    if (new LinkedHashSet<>(masks).size() == 1) {
+      return masks.get(0);
+    }
+    StringBuilder text = new StringBuilder();
+    for (int i = 0; i < masks.size(); i++) {
+      text.append(conditions.get(i).isEmpty() ? "ELSE " : "WHEN " + conditions.get(i) + " THEN ")
+          .append(masks.get(i))
+          .append("; ");
+    }
+    return text.isEmpty() ? "" : text.substring(0, text.length() - 2);
   }
 
   /**
