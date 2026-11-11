@@ -49,7 +49,49 @@ internal sealed class EvalContext : Vectors.IArenaScratch
     /// the common case and costs nothing.
     /// </summary>
     public ReadOnlySpan<byte> SelectionMask =>
-        _selected ? _mask.Bytes.AsSpan(0, Vectors.Validity.ByteCount(Length)) : default;
+        _narrowed is not null
+            ? _narrowed.AsSpan(0, Vectors.Validity.ByteCount(Length))
+            : _selected ? _mask.Bytes.AsSpan(0, Vectors.Validity.ByteCount(Length)) : default;
+
+    /// <summary>
+    /// The lanes a <c>CASE</c> branch is being evaluated for (F289), owned by the branch's
+    /// expression, or null outside one. It replaces the batch's selection while it is set, and is
+    /// already intersected with it.
+    /// </summary>
+    private byte[]? _narrowed;
+
+    /// <summary>
+    /// The <see cref="BatchSequence"/> of the batch itself, which a narrowed scope inside it leaves
+    /// alone: what an answer for the whole batch is keyed by, for a branch to reuse (F289).
+    /// </summary>
+    public long BatchScope { get; private set; }
+
+    /// <summary>Strictly increasing, so every scope's <see cref="BatchSequence"/> is its own.</summary>
+    private long _scopes;
+
+    /// <summary>What <see cref="Narrow"/> replaced, for <see cref="Restore"/> to put back.</summary>
+    public readonly record struct Scope(byte[]? Narrowed, long Sequence);
+
+    /// <summary>
+    /// Evaluates under <paramref name="lanes"/> — a bit per row, a subset of the current selection —
+    /// until <see cref="Restore"/>: every guard then skips the other lanes, so a <c>CASE</c> branch
+    /// raises for no row that does not take it (F289). The scope has a sequence of its own, so a
+    /// shared node's answer for it is never taken for the batch's, nor the batch's for it.
+    /// </summary>
+    public Scope Narrow(byte[] lanes)
+    {
+        var replaced = new Scope(_narrowed, BatchSequence);
+        _narrowed = lanes;
+        BatchSequence = ++_scopes;
+        return replaced;
+    }
+
+    /// <summary>Puts back what <see cref="Narrow"/> replaced.</summary>
+    public void Restore(Scope scope)
+    {
+        _narrowed = scope.Narrowed;
+        BatchSequence = scope.Sequence;
+    }
 
     public void Acquire(ExecutionArena arena) => _mask.Acquire(arena);
 
@@ -120,7 +162,9 @@ internal sealed class EvalContext : Vectors.IArenaScratch
     /// <summary>Points the context at the next batch. Cheap: an operator does this per batch.</summary>
     public void SetBatch(ColumnarBatch? batch, int length)
     {
-        BatchSequence++;
+        BatchSequence = ++_scopes;
+        BatchScope = BatchSequence;
+        _narrowed = null;
         Batch = batch;
         Length = length;
         _selected = batch is { HasSelection: true };
