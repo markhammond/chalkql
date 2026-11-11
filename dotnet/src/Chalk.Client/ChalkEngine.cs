@@ -268,6 +268,9 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         var identity = new object();
         var claimed = new List<SourceRegistration>(options.Sources.Count);
 
+        // Engines may share a planner client; it is disposed with the last of them (F290).
+        PlannerLeases.Acquire(options.Planner);
+
         try
         {
             var sources = new Dictionary<string, ISourceRuntime>(StringComparer.Ordinal);
@@ -415,6 +418,7 @@ public sealed partial class ChalkEngine : IAsyncDisposable
         catch
         {
             ReleaseClaims(claimed, identity);
+            PlannerLeases.Release(options.Planner, retire: false);
             throw;
         }
     }
@@ -2321,8 +2325,16 @@ public sealed partial class ChalkEngine : IAsyncDisposable
 
         _arenas.Dispose();
         _refreshing.Dispose();
-        await _options.Planner.DisposeAsync().ConfigureAwait(false);
+
+        // The planner client goes with the last engine using it, and not before (F290).
+        if (Interlocked.Exchange(ref _plannerReleased, 1) == 0
+            && PlannerLeases.Release(_options.Planner, retire: true))
+        {
+            await _options.Planner.DisposeAsync().ConfigureAwait(false);
+        }
     }
+
+    private int _plannerReleased;
 
     internal ExecutionSettings Settings => _settings;
 

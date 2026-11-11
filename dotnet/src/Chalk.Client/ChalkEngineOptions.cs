@@ -207,6 +207,14 @@ public sealed class ChalkEngineOptions
 
     public required IReadOnlyList<ISourceRuntime> Sources { get; init; }
 
+    /// <summary>The planner client this engine plans with.</summary>
+    /// <remarks>
+    /// Engines may share one client, and each keeps its own catalog on the planner. The client is
+    /// disposed with the last engine that uses it: an engine made with a client of its own disposes it
+    /// as it is disposed, and disposing one of several engines on a client leaves the others planning.
+    /// A client disposed that way cannot be given to another engine; such an engine is refused when it
+    /// is made.
+    /// </remarks>
     public required IQueryPlanner Planner { get; init; }
 
     public ExecutionOptions Execution { get; init; } = new();
