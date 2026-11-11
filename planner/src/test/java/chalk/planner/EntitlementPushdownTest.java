@@ -822,6 +822,26 @@ class EntitlementPushdownTest {
     return onlyRemote(plan(catalog, sql, context)).getQueryText();
   }
 
+  /**
+   * An entitled table's fence (F288) does not keep an {@code ORDER BY} from its source: the sort goes
+   * below the fence and travels with the row predicate, and nothing sorts again here.
+   */
+  @Test
+  void an_order_by_over_an_entitled_table_still_reaches_its_source() throws Exception {
+    CatalogContext catalog =
+        TenancyCatalogs.remote(
+            Enforcement.ENFORCEMENT_PUSHDOWN, TestCatalogs.fullSqlCapabilities().build(), false);
+    PlannerPipeline.Result result =
+        plan(
+            catalog,
+            "SELECT id FROM remote.members ORDER BY postcode DESC",
+            TenancyCatalogs.manager(1, 2));
+
+    String remote = remoteFor(result, "members");
+    assertThat(remote).contains("ORDER BY").contains("IN (1, 2)");
+    assertThat(result.physicalPlanText()).doesNotContain("ChalkSort").doesNotContain("ChalkTopN");
+  }
+
   private static PlannerPipeline.Result plan(
       CatalogContext catalog, String sql, RequestContext context) throws Exception {
     RegisteredCatalog registered = new CatalogRegistry().register(catalog);

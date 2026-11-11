@@ -151,6 +151,24 @@ public sealed class EntitlementBarrierTests(SharedSidecar sidecar) : IDisposable
         }
     }
 
+    /// <summary>
+    /// An <c>ORDER BY</c> over an entitled table orders the rows the principal is shown, through the
+    /// fence. That it still reaches a source that can sort is the planner's own test
+    /// (<c>EntitlementPushdownTest</c>): this fixture's source takes no list of strings, so its rows
+    /// are filtered, and sorted, here.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Runs))]
+    public async Task An_order_by_orders_the_admitted_rows(Run run)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var fixture = await Fixture.CreateAsync(this, sidecar, run);
+
+        Assert.Equal(
+            ["TRK-TEAK11", "TRK-PETREL22"],
+            await fixture.IdsAsync("SELECT TrackId FROM s.tracks ORDER BY Callsign DESC", "ALD", "KESTREL"));
+    }
+
     /// <summary>Everything an exception says, its inner ones included.</summary>
     private static string Said(Exception error)
     {

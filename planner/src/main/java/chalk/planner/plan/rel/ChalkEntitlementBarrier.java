@@ -74,8 +74,9 @@ public final class ChalkEntitlementBarrier extends SingleRel implements ChalkRel
   /**
    * No required order is passed down: offering one through the fence let the top-down search
    * choose a plan whose fence read its own set, a cycle the cheapest-plan walk never leaves, where
-   * every alternative was priced as one a guard refuses ({@code PUSHDOWN_REQUIRED}). An order the
-   * statement asks for is met above the fence, over the admitted rows.
+   * every alternative was priced as one a guard refuses ({@code PUSHDOWN_REQUIRED}). It is not
+   * needed for an order to reach a source: the Hep passes move an {@code ORDER BY} below the fence,
+   * the leaf takes it with it, and the fence reports the order its input delivers.
    */
   @Override
   public @Nullable Pair<RelTraitSet, List<RelTraitSet>> passThroughTraits(RelTraitSet required) {
