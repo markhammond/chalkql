@@ -15,9 +15,10 @@ namespace Chalk.Execution.Expressions;
 /// The batch is a sufficient key because an operator evaluates all of its expressions under the
 /// batch's one selection, and only the four operators that evaluate expressions — the projection,
 /// the filter, the hash aggregate and a pair join's residual — point their context at a batch, each
-/// once per batch. No expression narrows the context for a sub-expression: a <c>CASE</c> evaluates
-/// every branch over the whole batch and chooses per lane, and <c>AND</c> and <c>OR</c> evaluate
-/// every operand. One that did would have to make the selection part of the key.
+/// once per batch. One expression narrows the context: a <c>CASE</c> evaluates each branch over the
+/// lanes that take it (F289). A branch reuses an answer for the batch but never computes one
+/// (<see cref="BranchReuseExpr"/>), and the narrowed scope has a <c>BatchSequence</c> of its own.
+/// <c>AND</c> and <c>OR</c> evaluate every operand.
 /// </para>
 /// <para>
 /// A cached vector stays valid for the batch because no consumer writes into what it reads: an
@@ -53,6 +54,24 @@ internal sealed class SharedExpr : IVectorExpr
 
     /// <summary>Marks this node as answering for more than one occurrence. Only the compiler calls it.</summary>
     public void Share() => _shared = true;
+
+    /// <summary>
+    /// This node's answer for the whole batch, where it has one: what a <c>CASE</c> branch may reuse
+    /// (F289). An answer for the batch has a value for every lane, the branch's among them; a branch
+    /// never answers for the batch itself.
+    /// </summary>
+    public bool TryReuse(EvalContext context, out Vector answer)
+    {
+        if (_shared && _answeredBatch == context.BatchScope && _answeredGeneration == context.Generation)
+        {
+            _tally?.NoteReused();
+            answer = _answer;
+            return true;
+        }
+
+        answer = default;
+        return false;
+    }
 
     public Vector Evaluate(EvalContext context)
     {
@@ -102,4 +121,19 @@ internal sealed class SharingTally
     internal void NoteComputed() => Computed++;
 
     internal void NoteReused() => Reused++;
+}
+
+/// <summary>
+/// An occurrence inside a <c>CASE</c> branch of a subtree the operator shares (F289): the shared
+/// node's answer for the batch where it has one, as in <c>CASE WHEN UPPER(name) = 'X' THEN
+/// UPPER(name) END</c>, and otherwise a copy of its own, evaluated over the branch's lanes into
+/// scratch nothing else reads. It never computes for the shared node, whose answer the batch's other
+/// readers may hold.
+/// </summary>
+internal sealed class BranchReuseExpr(SharedExpr shared, IVectorExpr own) : IVectorExpr
+{
+    public ChalkType Type => own.Type;
+
+    public Vector Evaluate(EvalContext context) =>
+        shared.TryReuse(context, out var answer) ? answer : own.Evaluate(context);
 }

@@ -43,6 +43,14 @@ internal sealed class ExpressionCompiler
     /// </summary>
     private int _withinConstant;
 
+    /// <summary>
+    /// Above zero while the compiler is inside a <c>CASE</c> branch, which is evaluated over the
+    /// lanes that take it alone (F289). A branch reuses a shared node's answer for the batch but never
+    /// computes one: the node writes its answer into scratch of its own, and answering again for a
+    /// branch's lanes would overwrite what the batch's other readers of it hold.
+    /// </summary>
+    private int _withinBranch;
+
     /// <summary>A compiler for a plan that cannot name a user function — every test before step 22.</summary>
     public ExpressionCompiler()
         : this(null, HostFunctionSet.Empty)
@@ -94,6 +102,25 @@ internal sealed class ExpressionCompiler
         if (!Memoisable(expr))
         {
             return CompileNode(expr);
+        }
+
+        // Inside a CASE branch (F289): the batch's answer of a subtree shared outside, else a copy of
+        // its own; and nothing entered for later occurrences to share.
+        if (_withinBranch > 0)
+        {
+            if (!_memo.TryGetValue(expr, out var outside))
+            {
+                return CompileNode(expr);
+            }
+
+            if (!outside.IsShared)
+            {
+                outside.Share();
+                SharedNodes++;
+                _tally?.Observe(SharedNodes);
+            }
+
+            return new BranchReuseExpr(outside, CompileNode(expr));
         }
 
         if (_memo.TryGetValue(expr, out var known))
@@ -374,13 +401,29 @@ internal sealed class ExpressionCompiler
         for (var i = 0; i < clauses.Count; i++)
         {
             conditions[i] = Compile(clauses[i].Condition);
-            results[i] = Compile(clauses[i].Result);
+        }
+
+        // The branches, each evaluated over its own lanes (F289), and so shared with nothing.
+        IVectorExpr elseBranch;
+        _withinBranch++;
+        try
+        {
+            for (var i = 0; i < clauses.Count; i++)
+            {
+                results[i] = Compile(clauses[i].Result);
+            }
+
+            elseBranch = Compile(expr.IfThen.ElseBranch);
+        }
+        finally
+        {
+            _withinBranch--;
         }
 
         // D295: a CASE over composites of one type chooses per lane and answers field by field.
         return type.Kind == TypeKind.Composite
-            ? CompositeChoiceExpr.Case(type, conditions, results, Compile(expr.IfThen.ElseBranch))
-            : new IfThenExpr(type, conditions, results, Compile(expr.IfThen.ElseBranch));
+            ? CompositeChoiceExpr.Case(type, conditions, results, elseBranch)
+            : new IfThenExpr(type, conditions, results, elseBranch);
     }
 
     /// <summary>

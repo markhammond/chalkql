@@ -98,9 +98,11 @@ internal sealed class NullIfExpr : VectorExprBase
 }
 
 /// <summary>
-/// <c>CASE WHEN … THEN … ELSE … END</c>. Every branch is evaluated and then selected from, which is
-/// what a vectorised engine can do and a row engine cannot; the IR forbids side effects, so the only
-/// visible difference would be an error raised in an untaken branch.
+/// <c>CASE WHEN … THEN … ELSE … END</c>. The conditions are evaluated in order over every lane, and
+/// each branch then over the lanes that take it and no other (F289): a lane is a branch's when its
+/// condition is the first to hold, and the <c>ELSE</c>'s when none does. So a branch raises for no
+/// row whose condition is false, as SQL means, and <c>CASE WHEN x &lt;&gt; 0 THEN y / x END</c>
+/// guards the division. A branch every lane takes is evaluated as the batch is, with no narrowing.
 /// </summary>
 internal sealed class IfThenExpr : VectorExprBase
 {
@@ -109,6 +111,9 @@ internal sealed class IfThenExpr : VectorExprBase
     private readonly IVectorExpr _elseBranch;
     private readonly Vector[] _vectors;
     private int[] _choice = [];
+
+    /// <summary>The lanes of the branch being evaluated, a bit per row; grown, never shrunk.</summary>
+    private byte[] _lanes = [];
 
     public IfThenExpr(
         ChalkType type, IVectorExpr[] conditions, IVectorExpr[] results, IVectorExpr elseBranch)
@@ -142,11 +147,57 @@ internal sealed class IfThenExpr : VectorExprBase
 
         for (var k = 0; k < _results.Length; k++)
         {
-            _vectors[k] = _results[k].Evaluate(context);
+            _vectors[k] = Branch(context, _results[k], choice, k);
         }
 
-        _vectors[^1] = _elseBranch.Evaluate(context);
+        _vectors[^1] = Branch(context, _elseBranch, choice, _results.Length);
         return Assemble(length, _vectors, choice);
+    }
+
+    /// <summary><paramref name="branch"/> evaluated over the selected lanes that chose <paramref name="k"/>.</summary>
+    private Vector Branch(EvalContext context, IVectorExpr branch, ReadOnlySpan<int> choice, int k)
+    {
+        var length = context.Length;
+        var selection = context.SelectionMask;
+        var bytes = Validity.ByteCount(length);
+        if (_lanes.Length < Math.Max(bytes, 1))
+        {
+            _lanes = new byte[Math.Max(bytes, 1)];
+        }
+
+        var lanes = _lanes.AsSpan(0, bytes);
+        lanes.Clear();
+        var taken = 0;
+        var selected = 0;
+        for (var i = 0; i < length; i++)
+        {
+            if (!selection.IsEmpty && !Apache.Arrow.BitUtility.GetBit(selection, i))
+            {
+                continue;
+            }
+
+            selected++;
+            if (choice[i] == k)
+            {
+                Apache.Arrow.BitUtility.SetBit(lanes, i);
+                taken++;
+            }
+        }
+
+        if (taken == selected)
+        {
+            return branch.Evaluate(context);
+        }
+
+        var scope = context.Narrow(_lanes);
+        try
+        {
+            return branch.Evaluate(context);
+        }
+        finally
+        {
+            context.Restore(scope);
+        }
     }
 }
 
