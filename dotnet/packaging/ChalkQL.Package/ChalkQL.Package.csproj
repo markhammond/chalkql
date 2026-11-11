@@ -23,16 +23,16 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.7.0 makes the entitlements explanation readable as it comes, lets a schema keep names SQL reserves, and gives the engine's clock to every way of running a statement.
+      ChalkQL 0.7.1 is a security release: upgrade if you use entitlements.
 
-      - **Explanation as SQL:** `ExplainAsync` writes its expressions over column names: `MissionId IN ('KESTREL', 'SENTINEL')` rather than `SEARCH($1, Sarg[...])`. Reserved names are quoted, another table's column is `table.column`, a parent or path is the `EXISTS` that says so, open context is `@ctx.name`, and a conjunction under a disjunction is parenthesised. The expressions are unchanged; their text is not.
-      - **The mask that applies:** `ExplainedColumn.Mask` is a rule's own mask, else the column's, and empty where the column is in full.
-      - **Reserved words as names:** a column, table or schema named `Open`, `At`, `Value` or `national` works unquoted, in statements and policies, and the policy compiler quotes the names it writes. An unquoted `USER`, `CURRENT_DATE` or kin naming a column in scope is refused as ambiguous.
-      - **`@now` on every path:** on an engine with a clock, an unbound `@now` is the clock however a statement is run, with a list, no values or a principal's context. A list one value short leaves it to the clock.
-      - **Compatibility:** no change to the API surface, the protocol or the IR, and 0.6.3 and 0.7.0 planners and clients interoperate. The explanation's text changes form, and an empty parameter list for a statement with parameters is now refused.
+      - **Entitled tables are barriers:** a condition put round an entitled table is evaluated only on the rows the policy admits. Before, an error could quote a value of a row the principal was not shown, and whether a statement failed could reveal whether such a row existed. A security advisory on the repository describes it. A condition that cannot raise, an ORDER BY on columns, joins, aggregates and bounds still reach the source and its indexes; a condition that can raise now runs locally over the admitted rows.
+      - **CASE:** a branch runs only for the rows that take it, so CASE WHEN x &lt;&gt; 0 THEN y / x END guards the division.
+      - **Planner clients:** engines may share one; it is disposed with the last of them, and an engine made on a client already disposed that way is refused when it is made.
+      - **Licence:** the package carries the Elastic License 2.0 text; earlier packages named an empty licence file.
+      - **Compatibility:** no change to the API surface, the protocol or the IR. The barrier is the planner's, which ships inside this package.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.7.0
+      https://github.com/markhammond/chalkql/releases/tag/v0.7.1
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
