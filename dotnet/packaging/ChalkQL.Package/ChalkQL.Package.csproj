@@ -48,7 +48,7 @@
     </Description>
     
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <PackageLicenseFile>LICENSE</PackageLicenseFile>
 
     <!--
       Packaging projects deliberately opt out of Central Package Management. They synthesise the
@@ -73,8 +73,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="LICENSE.txt" 
-          Pack="true" 
+    <!--
+      The repository's own licence, packed at the package's root as the file PackageLicenseFile
+      names: one text, so the package can never carry a copy that has drifted from it, or an empty
+      one.
+    -->
+    <None Include="$(RepoRoot)LICENSE"
+          Pack="true"
           PackagePath="" />
   </ItemGroup>
   
@@ -171,4 +176,12 @@
     <Error Condition="!Exists('THIRD-PARTY-NOTICES.txt')"
            Text="Missing generated THIRD-PARTY-NOTICES.txt. Run scripts/third-party-notices.py." />
   </Target>
+  <!-- A package whose licence is empty states no terms at all; refuse to pack it. -->
+  <Target Name="RequireLicenceText" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(RepoRoot)LICENSE')"
+           Text="The licence to pack, $(RepoRoot)LICENSE, does not exist." />
+    <Error Condition="Exists('$(RepoRoot)LICENSE') And '$([System.IO.File]::ReadAllText(`$(RepoRoot)LICENSE`).Trim())' == ''"
+           Text="The licence to pack, $(RepoRoot)LICENSE, is empty." />
+  </Target>
+
 </Project>
