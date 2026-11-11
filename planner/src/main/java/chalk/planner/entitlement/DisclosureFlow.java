@@ -146,7 +146,10 @@ final class DisclosureFlow {
                   rel instanceof Sort
                       || rel instanceof ChalkLimit
                       || rel instanceof ChalkTopN
-                      || rel instanceof SourceToLocalConverter,
+                      || rel instanceof SourceToLocalConverter
+                      // An entitled leaf's fence (F288), which passes the leaf's rows unchanged.
+                      || rel instanceof chalk.planner.plan.rel.EntitlementBarrier
+                      || rel instanceof chalk.planner.plan.rel.ChalkEntitlementBarrier,
               (flow, rel, width) -> flow.at(rel.getInput(0)),
               Rel.KindCase.SORT,
               Rel.KindCase.FETCH,

@@ -151,6 +151,15 @@ public final class DisclosureColumns {
       }
       return barrier(rel, carriers, emitted, rexBuilder);
     }
+    // An entitled leaf's fence (F288) passes the leaf's rows, siblings and all, unchanged.
+    if (rel instanceof chalk.planner.plan.rel.EntitlementBarrier fence) {
+      Carried in = pullUp(fence.getInput(), carriers, emitted, rexBuilder);
+      if (isCarrying(in)) {
+        return new Carried(
+            fence.copy(fence.getTraitSet(), List.of(in.rel())), in.originals(), in.sources());
+      }
+      return barrier(rel, carriers, emitted, rexBuilder);
+    }
     if (rel instanceof Sort sort) {
       Carried in = pullUp(sort.getInput(), carriers, emitted, rexBuilder);
       if (isCarrying(in)) {

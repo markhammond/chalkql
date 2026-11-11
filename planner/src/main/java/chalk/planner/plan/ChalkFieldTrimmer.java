@@ -81,6 +81,19 @@ public final class ChalkFieldTrimmer extends RelFieldTrimmer {
     return dispatchTrimFields(input, used.build(), extraFields);
   }
 
+  /**
+   * An entitled leaf's fence (F288) passes the columns asked for through, as it passes the rows: the
+   * leaf below it is trimmed to them, and the fence's row is the leaf's.
+   */
+  public TrimResult trimFields(
+      chalk.planner.plan.rel.EntitlementBarrier barrier,
+      ImmutableBitSet fieldsUsed,
+      Set<RelDataTypeField> extraFields) {
+    TrimResult trimmed = trimChild(barrier, barrier.getInput(), fieldsUsed, extraFields);
+    return result(
+        barrier.copy(barrier.getTraitSet(), java.util.List.of(trimmed.left)), trimmed.right, barrier);
+  }
+
   /** The single-input overload: {@code Aggregate}, {@code Filter}, {@code Project}, and the rest. */
   @Override
   protected TrimResult trimChild(

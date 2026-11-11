@@ -659,7 +659,18 @@ public final class EntitlementPass {
   private RelNode rewrite(RelNode rel) {
     if (rel instanceof TableScan scan) {
       LeafFold leaf = folds.get(scan);
-      return leaf == null ? scan : emit(scan, leaf);
+      if (leaf == null) {
+        return scan;
+      }
+      // Fenced, so the statement's own work stays above the entitlement (F288). The fence passes the
+      // leaf's row, so it carries whatever comparisons the leaf computes for the statement (D261).
+      RelNode emitted = emit(scan, leaf);
+      RelNode fenced = chalk.planner.plan.rel.EntitlementBarrier.over(emitted);
+      Integer extra = widened.get(emitted);
+      if (extra != null) {
+        widened.put(fenced, extra);
+      }
+      return fenced;
     }
 
     List<RelNode> inputs = rel.getInputs();

@@ -3668,6 +3668,21 @@ split: the tenancy part goes to the source, and a client-bodied condition beside
 stays here. Without the split, that condition would hold the tenancy filter back, and
 the whole table would be fetched.
 
+**An entitled table is a barrier.** What a statement does with an entitled table's rows
+is evaluated on the rows the policy admits, as a PostgreSQL `security_barrier` view is. A
+condition that could raise or fail depending on a row is kept above the policy's filter,
+whether it is in the statement's own `WHERE` or put round it, as in
+`SELECT * FROM (<statement>) AS t WHERE <condition>`. That covers a cast that can fail, a
+division, arithmetic and most functions. So an error never quotes a value from a row the
+principal is not shown, and whether a statement fails says nothing about such a row.
+
+The conditions that cannot leak still reach the source and its indexes: comparisons,
+`AND`, `OR` and `NOT`, the `IS` tests, `IN` lists, `LIKE`, `COALESCE`, `CASE`,
+`UPPER`, `LOWER` and `TRIM` over them, a lossless cast, and anything that reads no
+column, such as `@now - INTERVAL '10' MINUTE`. So does a join on such a condition, an
+aggregate, a sort and a bound. The rest is evaluated here, over the rows the source
+returned.
+
 **Masks do not travel.** Take an expression that is not a bare column reference, and
 that reads a column this principal may not see in full. It never enters a source's
 query. A manager's `UPPER(first_name) = 'T'` is pushed, because they see the column in

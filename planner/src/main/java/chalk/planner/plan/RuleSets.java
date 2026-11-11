@@ -78,6 +78,15 @@ public final class RuleSets {
         CoreRules.FILTER_PROJECT_TRANSPOSE,
         CoreRules.PROJECT_MERGE,
         CoreRules.PROJECT_REMOVE,
+        // F288: across an entitled leaf's fence, only what cannot leak.
+        chalk.planner.plan.rules.EntitlementBarrierRules.FILTER,
+        chalk.planner.plan.rules.EntitlementBarrierRules.PROJECT,
+        chalk.planner.plan.rules.EntitlementBarrierRules.AGGREGATE,
+        chalk.planner.plan.rules.EntitlementBarrierRules.SORT,
+        chalk.planner.plan.rules.EntitlementBarrierRules.JOIN_LEFT,
+        chalk.planner.plan.rules.EntitlementBarrierRules.JOIN_RIGHT,
+        chalk.planner.plan.rules.EntitlementBarrierRules.MERGE,
+        chalk.planner.plan.rules.EntitlementBarrierRules.EMPTY,
         // Ordering by a column the WHERE clause pins to a constant is ordering by nothing. Without
         // this the constant that PROJECT_REDUCE_EXPRESSIONS substitutes hides the declared collation
         // and corpus query 06 sorts for no reason.
@@ -222,6 +231,14 @@ public final class RuleSets {
         CoreRules.FILTER_PROJECT_TRANSPOSE,
         CoreRules.PROJECT_MERGE,
         CoreRules.PROJECT_REMOVE,
+        chalk.planner.plan.rules.EntitlementBarrierRules.FILTER,
+        chalk.planner.plan.rules.EntitlementBarrierRules.PROJECT,
+        chalk.planner.plan.rules.EntitlementBarrierRules.AGGREGATE,
+        chalk.planner.plan.rules.EntitlementBarrierRules.SORT,
+        chalk.planner.plan.rules.EntitlementBarrierRules.JOIN_LEFT,
+        chalk.planner.plan.rules.EntitlementBarrierRules.JOIN_RIGHT,
+        chalk.planner.plan.rules.EntitlementBarrierRules.MERGE,
+        chalk.planner.plan.rules.EntitlementBarrierRules.EMPTY,
         // D106: prune a partitioned scan once the predicates have reached the leaves, and push the
         // columns the query actually reads into every partition.
         PartitionRules.PRUNE,
@@ -356,6 +373,11 @@ public final class RuleSets {
     rules.add(CoreRules.SORT_PROJECT_TRANSPOSE);
     rules.add(CoreRules.PROJECT_MERGE);
     rules.add(CoreRules.FILTER_MERGE);
+
+    // F288: an entitled leaf's fence, kept through the search. What may cross it crossed in the Hep
+    // passes; in the search an equivalence between a fence and what it fences would merge their
+    // sets, and a fence would then read its own.
+    rules.add(chalk.planner.plan.rules.EntitlementBarrierRules.CONVERT);
 
     // M4 (D83): one convention per remote source, one generic rule set each.
     for (SourceConvention source : sources) {
