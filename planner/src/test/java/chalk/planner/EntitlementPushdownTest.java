@@ -146,6 +146,24 @@ class EntitlementPushdownTest {
     assertThat(result.pushedRowPredicates()).containsExactly("remote.members");
   }
 
+  /**
+   * F304: a row predicate over a column the statement does not read reaches the source under a pushed
+   * projection that pruned columns, and is reported as pushed: read through the scan alone, the
+   * filter's columns were numbered as the table's, and {@code postcode} was taken for {@code org_id}.
+   */
+  @Test
+  void a_row_predicate_under_a_pruning_projection_is_reported_as_pushed() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            withRowPredicate(
+                "(org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs)) AND postcode <> 'none'"),
+            "SELECT id FROM remote.members",
+            TenancyCatalogs.manager(1, 2));
+
+    assertThat(onlyRemote(result).getQueryText()).contains("'none'");
+    assertThat(result.pushedRowPredicates()).containsExactly("remote.members");
+  }
+
   private static CatalogContext withRowPredicate(String predicate) {
     CatalogContext catalog = TenancyCatalogs.remote();
     chalk.ir.v1.Schema remote = catalog.getSchemas(1);
