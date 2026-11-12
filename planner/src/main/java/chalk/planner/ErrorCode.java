@@ -167,6 +167,11 @@ public enum ErrorCode {
   BATCH_LIFETIME("BatchLifetime"),
   /** An operator failed while the query ran; the inner exception says why. */
   EXECUTION_FAILED("ExecutionFailed"),
+  /**
+   * An access policy met data it could not decide for a row, and the statement's result is withheld
+   * (F302, design 82). Raised by the client's executor; named here so the two lists agree.
+   */
+  POLICY_INDETERMINATE("PolicyIndeterminate"),
 
   // Sources.
 

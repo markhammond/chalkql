@@ -27,6 +27,8 @@ internal sealed class FilterOperator : OperatorBase, IStreams
     private readonly ColumnarBatch _output;
     private readonly double _threshold;
     private int[] _selection = [];
+    private readonly string? _quarantine;
+    private byte[] _lane = [];
 
     public FilterOperator(
         OperatorContext context,
@@ -34,11 +36,13 @@ internal sealed class FilterOperator : OperatorBase, IStreams
         ArrowSchema schema,
         IReadOnlyList<ChalkType> columnTypes,
         IBatchOperator input,
-        IVectorExpr condition)
+        IVectorExpr condition,
+        string? quarantine = null)
         : base(context, schema, columnTypes, path)
     {
         _input = input;
         _condition = condition;
+        _quarantine = quarantine;
         _eval = context.NewEvalContext();
         _copiers = [.. columnTypes.Select(t => new ColumnCopier(t))];
         _output = NewOutput();
@@ -68,8 +72,22 @@ internal sealed class FilterOperator : OperatorBase, IStreams
     {
         var length = batch.RowCount;
         _eval.SetBatch(batch, length);
-        var mask = _condition.Evaluate(_eval);
-        var selected = Select(mask, batch);
+        int selected;
+        if (_quarantine is null)
+        {
+            selected = Select(_condition.Evaluate(_eval), batch);
+        }
+        else
+        {
+            try
+            {
+                selected = Select(_condition.Evaluate(_eval), batch);
+            }
+            catch (Exception error) when (Chalk.Sources.IndeterminateLedger.IsDataError(error))
+            {
+                selected = RowByRow(batch, error);
+            }
+        }
         if (selected == 0)
         {
             return null;
@@ -97,6 +115,67 @@ internal sealed class FilterOperator : OperatorBase, IStreams
         }
 
         return _output;
+    }
+
+    /// <summary>
+    /// Inside a quarantine (F302, design 82), the condition over each row alone, after it raised over
+    /// the batch: a row whose condition raises is not admitted, and is recorded as the policy's
+    /// indeterminate decision, a <c>RowsNotAdmitted</c>. A row is admitted only where its condition
+    /// answered true, so where its admission never depended on what failed.
+    /// </summary>
+    private int RowByRow(ColumnarBatch batch, Exception first)
+    {
+        var length = batch.RowCount;
+        var rows = batch.Count;
+        if (_selection.Length < length)
+        {
+            var grown = Context.Arena.Rent<int>(length);
+            Context.Arena.Return(_selection);
+            _selection = grown;
+        }
+
+        var bytes = Validity.ByteCount(length);
+        if (_lane.Length < Math.Max(bytes, 1))
+        {
+            _lane = new byte[Math.Max(bytes, 1)];
+        }
+
+        var count = 0;
+        long settled = 0;
+        for (var i = 0; i < rows; i++)
+        {
+            var row = batch.RowAt(i);
+            System.Array.Clear(_lane, 0, bytes);
+            Apache.Arrow.BitUtility.SetBit(_lane, row);
+            var scope = _eval.Narrow(_lane);
+            try
+            {
+                var answer = _condition.Evaluate(_eval);
+                var pass = answer.IsScalar
+                    ? !answer.Scalar.IsNull && answer.Scalar.Integer != 0
+                    : Lanes<byte>.From(answer) is var lanes && lanes.IsValid(row) && lanes[row] != 0;
+                if (pass)
+                {
+                    _selection[count++] = row;
+                }
+            }
+            catch (Exception error) when (Chalk.Sources.IndeterminateLedger.IsDataError(error))
+            {
+                settled++;
+            }
+            finally
+            {
+                _eval.Restore(scope);
+            }
+        }
+
+        if (settled > 0)
+        {
+            Context.Arena.Indeterminate?.Record(
+                _quarantine!, Chalk.Sources.IndeterminateResolution.RowsNotAdmitted, settled, first);
+        }
+
+        return count;
     }
 
     /// <summary>

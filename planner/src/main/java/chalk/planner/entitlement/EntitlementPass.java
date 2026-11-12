@@ -2886,7 +2886,7 @@ public final class EntitlementPass {
         operands.add(value);
         return cast(operands, unknown);
       }
-      operands.add(condition);
+      operands.add(guarded(condition));
       operands.add(value);
     }
     operands.add(none);
@@ -2984,7 +2984,7 @@ public final class EntitlementPass {
         operands.add(value);
         return finishOrdinal(operands, fold.underFilter());
       }
-      operands.add(condition);
+      operands.add(guarded(condition));
       operands.add(value);
     }
     operands.add(ordinal(reachable.otherwise()));
@@ -3349,12 +3349,29 @@ public final class EntitlementPass {
         operands.add(value);
         return finish(operands, disclosedType, fold.underFilter(), ref);
       }
-      operands.add(condition);
+      operands.add(guarded(condition));
       operands.add(value);
     }
     operands.add(
         value(reachable.otherwise(), entitled, -1, ref, columnType, table, columnName));
     return finish(operands, disclosedType, fold.underFilter(), ref);
+  }
+
+  /**
+   * A rule's folded condition, guarded where it reads the row and can raise (F302, design 82): the
+   * condition's own answer, or NULL for a row where evaluating it raised, so that a condition with no
+   * answer does not apply its rule and the row falls to the next, exactly as when it is false. A
+   * condition judged leakproof is left as it is, so that the simplifier can still collapse the
+   * sanitiser where the leaf's own conjuncts settle it; should that judgement miss, the quarantine
+   * round the leaf is the catch-all, and withholds the result (owner: "So long as the catch-all is
+   * implemented for each execution sub-graph I think we can exclude conditions that are judged
+   * leakproof"). One that reads no column cannot fail per row. The sanitiser, the lifted tests and
+   * the disclosure ordinals guard alike, so a row that raises gets the same rule in all three.
+   */
+  private RexNode guarded(RexNode condition) {
+    return RexUtil.containsInputRef(condition) && !Leakproof.is(condition)
+        ? rexBuilder.makeCall(chalk.planner.plan.ChalkOperatorTable.GUARDED, condition)
+        : condition;
   }
 
   private RexNode finish(
@@ -3446,7 +3463,7 @@ public final class EntitlementPass {
                   + " discloses MASKED and states no mask, so there is nothing to put in the "
                   + "value's place.");
         }
-        yield masked(mask, table, columnName);
+        yield mask;
       }
       // Tainted on purpose. The trace of §3.4 has already refused every consumer that is not an
       // allow-listed population aggregate, so reaching here means the raw value may leave the leaf
@@ -3459,26 +3476,6 @@ public final class EntitlementPass {
       case DISCLOSURE_TEST -> placeholder(entitled, rule, columnType);
       default -> placeholder(entitled, rule, columnType);
     };
-  }
-
-  /**
-   * A mask that reads the row, wrapped so that an error raised computing it is reported without its
-   * own text (F300): the mask is evaluated in place of the value its rule hides, and an error there
-   * could quote it. Registration refuses a mask that can raise, so this holds only should that
-   * judgement miss. A mask that reads no column cannot fail per row, and is left as it is, which
-   * keeps a constant mask a constant for the rest of the planner.
-   */
-  private RexNode masked(RexNode mask, ChalkTable table, String columnName) {
-    if (!org.apache.calcite.rex.RexUtil.containsInputRef(mask)) {
-      return mask;
-    }
-    return rexBuilder.makeCall(
-        mask.getType(),
-        chalk.planner.plan.ChalkOperatorTable.MASKED,
-        List.of(
-            mask,
-            rexBuilder.makeLiteral(
-                table.schemaName() + "." + table.tableName() + "." + columnName)));
   }
 
   /**

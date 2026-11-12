@@ -359,15 +359,15 @@ internal sealed class ReferenceInterpreter
             case FunctionId.IsNotFalse:
                 return Evaluate(call.Args[0], row) is not false;
 
-            // A mask, its data errors reported without their text (F300).
-            case FunctionId.Masked:
+            // A rule's guarded condition (F302): its answer, or NULL for a row where it raises.
+            case FunctionId.Guarded:
                 try
                 {
                     return Evaluate(call.Args[0], row);
                 }
-                catch (Exception error) when (Expressions.MaskedExpr.IsDataError(error))
+                catch (Exception error) when (Chalk.Sources.IndeterminateLedger.IsDataError(error))
                 {
-                    throw Expressions.MaskedExpr.Failed(Expressions.MaskedExpr.LabelOf(call));
+                    return null;
                 }
 
             // PRESENT sees its argument NULL or not and answers either way, so it belongs here

@@ -244,7 +244,12 @@ class EntitlementPassTest {
             "SELECT SUM(amount) AS total, SUM(amount) FILTER (WHERE id = 7) AS picked FROM orders",
             TenancyCatalogs.auditor(1));
     org.apache.calcite.rel.core.Aggregate aggregate = aggregateIn(result.physical());
-    org.apache.calcite.rel.core.Project guard = (org.apache.calcite.rel.core.Project) result.physical();
+    // The guard is the root projection; a quarantine's barrier (F302) may stand over it.
+    org.apache.calcite.rel.RelNode root = result.physical();
+    while (root instanceof chalk.planner.plan.rel.ChalkEntitlementBarrier barrier) {
+      root = barrier.getInput();
+    }
+    org.apache.calcite.rel.core.Project guard = (org.apache.calcite.rel.core.Project) root;
     int groups = aggregate.getGroupCount();
     java.util.List<org.apache.calcite.rel.core.AggregateCall> calls = aggregate.getAggCallList();
 

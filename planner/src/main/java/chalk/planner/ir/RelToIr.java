@@ -154,6 +154,18 @@ public final class RelToIr {
 
   /** One relation and everything under it. */
   public Rel toRel(RelNode node) {
+    // A barrier is no operator: it is written as the subtree it stood over, marked as the policy's
+    // quarantine and labelled with the entitled tables beneath (F302, design 82).
+    if (node instanceof chalk.planner.plan.rel.ChalkEntitlementBarrier barrier) {
+      Rel inner = toRel(barrier.getInput());
+      java.util.Set<String> tables = new java.util.TreeSet<>();
+      if (!inner.getQuarantine().isEmpty()) {
+        tables.addAll(java.util.List.of(inner.getQuarantine().split(", ")));
+      }
+      entitledTables(barrier.getInput(), tables);
+      return inner.toBuilder().setQuarantine(String.join(", ", tables)).build();
+    }
+
     Rel.Builder builder = Rel.newBuilder();
 
     // The rewrite put this node here rather than the query (step 26, §3.12). It carries no semantics
@@ -1012,6 +1024,18 @@ public final class RelToIr {
   private static boolean isCorrelation(RelNode node) {
     return node instanceof org.apache.calcite.rel.core.TableScan scan
         && chalk.planner.entitlement.CorrelationRelOptTable.isCorrelation(scan.getTable());
+  }
+
+  /** Every entitled table read beneath {@code node}, as {@code schema.table}: a quarantine's label. */
+  private static void entitledTables(RelNode node, java.util.Set<String> into) {
+    org.apache.calcite.plan.RelOptTable table = node.getTable();
+    if (table != null && chalk.planner.entitlement.EntitledRelOptTable.disclosureOf(table) != null) {
+      List<String> name = table.getQualifiedName();
+      into.add(String.join(".", name.subList(Math.max(0, name.size() - 2), name.size())));
+    }
+    for (RelNode input : node.getInputs()) {
+      entitledTables(input, into);
+    }
   }
 
   /** Whether this rel's table carries a disclosure map, which is what {@code policy_injected} says. */

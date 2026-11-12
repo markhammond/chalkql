@@ -328,12 +328,15 @@ enum FunctionId {
   // written, and the escape rules are LIKE's. Evaluated by the client only: no source's ILIKE folds
   // exactly so, and no index answers it.
   FUNCTION_ID_ILIKE = 83;
-  // (value, STRING label) -> the value's type: the value itself. An error raised evaluating it is
-  // reported as the mask on the column the label names having failed for a row, without the error's
-  // own text, which could quote the very value the mask hides (F300). The planner wraps a mask that
-  // reads a column in it, the label a literal `schema.table.column`; a statement cannot write it. It
-  // is not a source function in any dialect, so it never pushes.
-  FUNCTION_ID_MASKED = 84;
+  // 84 was FUNCTION_ID_MASKED, a mask's redacting wrapper that was never released: the quarantine
+  // (Rel.quarantine) redacts every error a policy raises.
+  reserved 84;
+  // (BOOL condition) -> BOOL, nullable: the condition's own answer, or NULL for a row where evaluating
+  // it raised (F302, design 82). The entitlement pass puts it round a rule's condition in the
+  // sanitising projection, so that a condition with no answer does not apply its rule; the executor
+  // evaluates the condition over the batch and, should it raise, over each row alone. A statement
+  // cannot write it. It is not a source function in any dialect, so it never pushes.
+  FUNCTION_ID_GUARDED = 85;
 }
 
 // Aggregate functions. Argument and result types are on the Measure.

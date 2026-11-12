@@ -245,26 +245,25 @@ public final class SourceSql {
      * whose wrong answer would therefore be silent — is evaluated the way Chalk evaluates it.
      */
     public static RelNode forDialect(RelNode pushed, SqlDialect dialect) {
-      // A mask the host lets travel (D153) is written as itself: the wrapper that redacts a mask's
-      // error is the client's (F300), and no source has it. Registration has already refused a mask
-      // that can raise, which is what holds at the source.
-      RelNode unwrapped = substitute(pushed, rel -> new Unmasked());
+      // A guarded rule condition (F302) is written as the condition: the guard is the client's, and
+      // the gate sent only a condition that cannot raise.
+      RelNode unguarded = substitute(pushed, rel -> new Unguarded());
       SqlOperator integerDivision = SourceDialects.integerDivision(dialect);
       return integerDivision == null
-          ? unwrapped
+          ? unguarded
           : substitute(
-              unwrapped,
+              unguarded,
               rel -> new IntegerDivision(integerDivision, rel.getCluster().getRexBuilder()));
     }
 
-    /** {@code $chalk$masked(mask, label)} written as the mask. */
-    private static final class Unmasked extends RexShuttle {
+    /** {@code $chalk$guarded(condition)} written as the condition. */
+    private static final class Unguarded extends RexShuttle {
       @Override
       public RexNode visitCall(RexCall call) {
         RexNode visited = super.visitCall(call);
-        return visited instanceof RexCall masked
-                && masked.getOperator() == chalk.planner.plan.ChalkOperatorTable.MASKED
-            ? masked.getOperands().get(0)
+        return visited instanceof RexCall guarded
+                && guarded.getOperator() == chalk.planner.plan.ChalkOperatorTable.GUARDED
+            ? guarded.getOperands().get(0)
             : visited;
       }
     }

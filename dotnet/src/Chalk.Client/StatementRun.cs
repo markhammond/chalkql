@@ -20,3 +20,28 @@ namespace Chalk.Client;
 /// numbered its refresh; null for any other execution, whose reads are not pinned to one epoch.
 /// </param>
 internal readonly record struct StatementRun(RequestContext? Context, ulong PlanDigest, long? Version);
+
+/// <summary>How the quarantine settled a decision its policy could not reach (F302, design 82).</summary>
+internal enum IndeterminateSettled
+{
+    RowsNotAdmitted,
+    RuleNotApplied,
+    EvaluatedHere,
+    StatementWithheld,
+}
+
+/// <summary>
+/// One kind of indeterminate decision in one execution, as the extension that decorated the statement
+/// hears of it (F302): the tables, how it was settled, how many it covered, and the first one's reason
+/// and cause, which may quote a value the policy hides.
+/// </summary>
+internal sealed record IndeterminateHeard(
+    Guid CorrelationId,
+    string Tables,
+    IndeterminateSettled Settled,
+    long Occurrences,
+    string Reason,
+    Exception Cause,
+    bool AtSource,
+    string? SqlState);
+

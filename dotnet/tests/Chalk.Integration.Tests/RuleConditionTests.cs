@@ -18,10 +18,10 @@ namespace Chalk.Integration.Tests;
 /// A rule whose condition could fail as it ran failed the statement quoting the row's value, even a
 /// value that rule set masked from the principal (<c>'SOURCE-01'</c>); and, on a table entitled
 /// through a declared path and prepared for a shape, failed it too for a principal who did not hold
-/// the rule's role. A condition of the policy is now refused when the engine is built if it can
-/// raise depending on the row, naming what can, and so is a mask or a placeholder (F300); and a
-/// mask that reads the row is wrapped so that, should that judgement miss, its error names the
-/// column and not the value. The executor evaluates an <c>AND</c>'s later operand, and a
+/// the rule's role. A granting rule's condition that can raise now registers, and where it raises for
+/// a row the rule is not applied (F302, design 82); a mask or a placeholder that can raise is refused
+/// when the engine is built (F300), and should one raise all the same the result is withheld, quoting
+/// nothing. The executor evaluates an <c>AND</c>'s later operand, and a
 /// <c>CASE</c>'s later condition, only for the rows the earlier ones left to it.
 /// </para>
 /// <para>
@@ -48,27 +48,27 @@ public sealed class RuleConditionTests(SharedSidecar sidecar)
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
-    /// A rule condition that can fail is refused as the engine is built, at the rule's place, naming
-    /// what can fail; the policy compiled, and no statement ever ran.
+    /// A granting rule's condition that can fail registers (F302, design 82): where it raises for a row,
+    /// the rule is not applied and the row gets the next, here the <c>otherwise</c>, which withholds;
+    /// where it answers, it decides as written. Nothing fails, so nothing is quoted.
     /// </summary>
     [Theory]
-    [InlineData("CAST(SourceIdentity AS INTEGER) = 1", "a cast to I32 can fail")]
-    [InlineData("10 / (RadiusNm - 2) > 1", "a division can divide by zero")]
-    [InlineData("CAST(CASE WHEN RadiusNm = 2 THEN 'x' ELSE '0' END AS INTEGER) = 0", "a cast to I32 can fail")]
-    public async Task A_rule_condition_that_can_raise_is_refused_when_the_engine_is_built(string when, string what)
+    [InlineData("CAST(SourceIdentity AS INTEGER) = 1", "<null>")]
+    [InlineData("10 / (RadiusNm - 2) > 1", "SOURCE-02")]
+    [InlineData("CAST(CASE WHEN RadiusNm = 2 THEN 'x' ELSE '0' END AS INTEGER) = 0", "SOURCE-02")]
+    public async Task A_granting_rule_condition_that_can_raise_registers_and_settles_closed(string when, string second)
     {
         Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
-
-        var refused = await Assert.ThrowsAsync<PlanningException>(() => Fixture.CreateAsync(
+        await using var fixture = await Fixture.CreateAsync(
             sidecar, path: false, (t, reader, _) => t.Access(new AccessRule
             {
                 Roles = [reader], Column = t.Column("SourceIdentity"), Grants = Verdict.Full, When = Sql.Of(when),
-            })));
+            }));
 
-        Assert.Equal(ChalkErrorCodes.InvalidEntitlement, refused.Code);
-        Assert.Contains("(SourceIdentity).rules[0].when", refused.Message, StringComparison.Ordinal);
-        Assert.Contains($"the rule condition can raise an error depending on the row: {what}", refused.Message, StringComparison.Ordinal);
-        Assert.Contains(when, refused.Message, StringComparison.Ordinal);
+        var reader = fixture.Bind(("KESTREL", "tasking_reader"));
+        Assert.Equal(
+            ["D1|<null>", $"D2|{second}"],
+            await fixture.WithValuesAsync("SELECT DatumId, SourceIdentity FROM s.datums ORDER BY DatumId", reader));
     }
 
     /// <summary>
@@ -106,7 +106,7 @@ public sealed class RuleConditionTests(SharedSidecar sidecar)
     /// </summary>
     [Theory]
     [InlineData("Lat", "CAST(CASE WHEN RadiusNm = 2 THEN 'x' ELSE '0' END AS DOUBLE)", "a cast to FP64 can fail")]
-    [InlineData("Lat", "Lat / (RadiusNm - 2)", "a division can divide by zero")]
+    [InlineData("Lat", "Lat / (RadiusNm - 2)", "arithmetic can overflow")]
     [InlineData("SourceIdentity", "SUBSTRING(SourceIdentity, 1, RadiusNm - 3)", "SUBSTRING can raise")]
     public async Task A_mask_that_can_raise_is_refused_when_the_engine_is_built(string column, string mask, string what)
     {
@@ -155,11 +155,8 @@ public sealed class RuleConditionTests(SharedSidecar sidecar)
         Assert.Matches("^D2\\|SOU-[0-9a-f]{4}\\|[23]$", rows[1]);
         Assert.NotEqual(rows[0].Split('|')[1], rows[1].Split('|')[1]);
 
-        Assert.Equal(2, CountOf("MASKED(", await fixture.PlanTextAsync(sql, reader)));
+        Assert.Contains("s.datums", await fixture.QuarantineAsync(sql, reader), StringComparison.Ordinal);
     }
-
-    private static int CountOf(string part, string text) =>
-        (text.Length - text.Replace(part, string.Empty, StringComparison.Ordinal).Length) / part.Length;
 
     private sealed class Fixture : IAsyncDisposable
     {
@@ -223,10 +220,26 @@ public sealed class RuleConditionTests(SharedSidecar sidecar)
             return await RowsAsync(execution);
         }
 
-        public async Task<string> PlanTextAsync(string sql, RequestContext context)
+        /// <summary>The tables of the plan's quarantines (F302), comma separated.</summary>
+        public async Task<string> QuarantineAsync(string sql, RequestContext context)
         {
             var prepared = await _engine.WithEntitlements().PrepareAsync(sql, context, ct: Ct);
-            return Chalk.Ir.PlanExtensions.ToPlanText(prepared.Query.Plan);
+            var found = new List<string>();
+            Walk(prepared.Query.Plan.Root);
+            return string.Join(", ", found);
+
+            void Walk(Chalk.Ir.Rel rel)
+            {
+                if (rel.Quarantine.Length > 0)
+                {
+                    found.Add(rel.Quarantine);
+                }
+
+                foreach (var input in Chalk.Ir.PlanWalker.Inputs(rel))
+                {
+                    Walk(input);
+                }
+            }
         }
 
         public ValueTask DisposeAsync() => _engine.DisposeAsync();

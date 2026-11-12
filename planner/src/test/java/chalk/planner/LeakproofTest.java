@@ -52,6 +52,15 @@ class LeakproofTest {
         .isTrue();
     assertThat(Leakproof.is(rex.makeCall(SqlStdOperatorTable.SUBSTRING, name, number(2)))).isTrue();
     assertThat(Leakproof.is(rex.makeCall(SqlStdOperatorTable.ROUND, column(real, 1)))).isTrue();
+    // Floating-point arithmetic, division included: IEEE gives an infinity or NaN, never an error.
+    RexNode quarter =
+        rex.makeCall(
+            SqlStdOperatorTable.DIVIDE,
+            rex.makeCall(
+                SqlStdOperatorTable.ROUND,
+                rex.makeCall(SqlStdOperatorTable.MULTIPLY, column(real, 1), rex.makeApproxLiteral(java.math.BigDecimal.valueOf(4)))),
+            rex.makeApproxLiteral(java.math.BigDecimal.valueOf(4)));
+    assertThat(Leakproof.is(quarter)).isTrue();
     assertThat(
             Leakproof.is(
                 rex.makeCall(
@@ -74,19 +83,20 @@ class LeakproofTest {
     assertThat(Leakproof.is(rex.makeCast(integer, name))).isFalse();
     assertThat(Leakproof.is(rex.makeCall(SqlStdOperatorTable.DIVIDE, number(10), column(integer, 3))))
         .isFalse();
+    // Integer and decimal arithmetic overflow, and raise.
+    assertThat(Leakproof.is(rex.makeCall(SqlStdOperatorTable.PLUS, column(integer, 3), number(1))))
+        .isFalse();
+    assertThat(Leakproof.is(rex.makeCall(SqlStdOperatorTable.MULTIPLY, column(decimal, 4), column(decimal, 4))))
+        .isFalse();
   }
 
   @Test
-  void the_wrapper_of_a_mask_is_as_leakproof_as_the_mask() {
-    RexNode prefix = rex.makeCall(SqlStdOperatorTable.SUBSTRING, column(string, 0), number(1), number(1));
-    assertThat(Leakproof.is(rex.makeCall(ChalkOperatorTable.MASKED, prefix, rex.makeLiteral("s.t.c"))))
-        .isTrue();
-    assertThat(
-            Leakproof.is(
-                rex.makeCall(
-                    ChalkOperatorTable.MASKED, rex.makeCast(integer, column(string, 0)),
-                    rex.makeLiteral("s.t.c"))))
-        .isFalse();
+  void a_guarded_condition_cannot_raise_whatever_it_holds() {
+    RexNode raising =
+        rex.makeCall(
+            SqlStdOperatorTable.EQUALS, rex.makeCast(integer, column(string, 0)), number(1));
+    assertThat(Leakproof.is(raising)).isFalse();
+    assertThat(Leakproof.is(rex.makeCall(ChalkOperatorTable.GUARDED, raising))).isTrue();
   }
 
   @Test

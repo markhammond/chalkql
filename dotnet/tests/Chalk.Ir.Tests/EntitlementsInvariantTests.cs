@@ -37,6 +37,8 @@ public sealed class EntitlementsInvariantTests
         {
             RowType = Members,
             PolicyInjected = policyInjected,
+            // Every entitled read stands in its barrier's quarantine (F302).
+            Quarantine = "main.members",
             Read = new Read
             {
                 Table = new TableRef { SourceId = "mem", Schema = "main", Table = "members" },
@@ -340,6 +342,7 @@ public sealed class EntitlementsInvariantTests
     {
         RowType = Members,
         PolicyInjected = true,
+        Quarantine = "main.members",
         Read = new Read
         {
             Table = new TableRef { SourceId = "mem", Schema = "main", Table = "members" },
@@ -569,6 +572,45 @@ public sealed class EntitlementsInvariantTests
     }
 
     /// <summary>And a plan that says what it does passes, so none of the above is vacuous.</summary>
+    /// <summary>
+    /// An entitled read outside every quarantine (F302, design 82): the plan does not mark the subtree
+    /// its barrier stood over, so an error its policy raised would reach the host as itself.
+    /// </summary>
+    [Fact]
+    public void An_entitled_read_outside_every_quarantine_is_refused()
+    {
+        var read = EntitledRead();
+        read.Quarantine = "";
+        var error = Refused(PlanOf(read), Catalog());
+
+        Assert.Equal("I-IR-E", error.Invariant);
+        Assert.Contains("stands in no quarantine", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>A quarantine above the read, not on it, holds it as well.</summary>
+    [Fact]
+    public void A_quarantine_above_an_entitled_read_holds_it()
+    {
+        var read = EntitledRead(
+            outcomes:
+            [
+                (0, DisclosureOutcome.Full),
+                (1, DisclosureOutcome.Full),
+                (2, DisclosureOutcome.Full),
+                (3, DisclosureOutcome.Full),
+                (4, DisclosureOutcome.Full),
+            ]);
+        read.Quarantine = "";
+        var plan = PlanOf(new Rel
+        {
+            RowType = Members,
+            Quarantine = "main.members",
+            Filter = new Filter { Input = read, Condition = Lit(true) },
+        });
+
+        PlanValidator.Validate(plan, Catalog());
+    }
+
     [Fact]
     public void A_well_formed_entitled_plan_validates()
     {

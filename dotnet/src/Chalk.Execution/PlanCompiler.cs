@@ -267,7 +267,20 @@ internal static class PlanCompiler
         /// registrations, because a client-bodied call names a function rather than an id (D78).
         /// </summary>
         private ExpressionCompiler Expressions(string path) =>
-            new(_catalog, _functions, _boundSlots, _tallies.GetOrAdd(path, static _ => new SharingTally()));
+            new(_catalog, _functions, _boundSlots, _tallies.GetOrAdd(path, static _ => new SharingTally()))
+            {
+                Quarantine = _quarantines.TryGetValue(path, out var tables) ? tables : "",
+            };
+
+        /// <summary>
+        /// The quarantine the subtree being compiled stands in (F302, design 82): the entitled tables
+        /// of the nearest quarantined node above, or null outside one.
+        /// </summary>
+        private string? _quarantine;
+
+        /// <summary>Each operator path inside a quarantine, and its tables, for its expressions' guards.</summary>
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _quarantines =
+            new(StringComparer.Ordinal);
 
         /// <summary>
         /// Each expression-evaluating operator's sharing (D299), by operator path, for tests. Every
@@ -295,6 +308,34 @@ internal static class PlanCompiler
         public OperatorFactory Node(Rel rel, string parentPath)
         {
             var path = $"{parentPath}/{rel.KindCase}";
+            if (rel.Quarantine.Length == 0)
+            {
+                return NodeAt(rel, path);
+            }
+
+            // The root of a quarantine (F302): the subtree compiles inside it, and is wrapped so that
+            // what it could not settle closed withholds the result.
+            var outer = _quarantine;
+            _quarantine = rel.Quarantine;
+            try
+            {
+                var inner = NodeAt(rel, path);
+                var tables = rel.Quarantine;
+                return context => new QuarantineOperator(context, path, inner(context), tables);
+            }
+            finally
+            {
+                _quarantine = outer;
+            }
+        }
+
+        private OperatorFactory NodeAt(Rel rel, string path)
+        {
+            if (_quarantine is not null)
+            {
+                _quarantines[path] = _quarantine;
+            }
+
             if (Substitute?.Invoke(rel, path) is { } substituted)
             {
                 return substituted;
@@ -1014,8 +1055,9 @@ internal static class PlanCompiler
             var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
             var types = Types(rel.RowType);
             var condition = rel.Filter.Condition;
+            var quarantine = _quarantine;
             return context => new FilterOperator(
-                context, path, schema, types, input(context), Expressions(path).Compile(condition));
+                context, path, schema, types, input(context), Expressions(path).Compile(condition), quarantine);
         }
 
         public OperatorFactory Project(Rel rel, string path)

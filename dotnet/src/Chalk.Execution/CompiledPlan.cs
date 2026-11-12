@@ -449,6 +449,37 @@ internal sealed class CompiledPlan
     private bool? _readsTime;
 
     /// <summary>
+    /// Whether the plan holds a quarantine (F302, design 82), found once: an execution of one keeps a
+    /// ledger of what its policy could not decide, and one of a plan without any keeps nothing.
+    /// </summary>
+    internal bool Quarantined => _quarantined ??= HasQuarantine(Plan.Root);
+
+    private bool? _quarantined;
+
+    private static bool HasQuarantine(Chalk.Ir.Rel? rel)
+    {
+        if (rel is null)
+        {
+            return false;
+        }
+
+        if (rel.Quarantine.Length > 0)
+        {
+            return true;
+        }
+
+        foreach (var input in Chalk.Ir.PlanWalker.Inputs(rel))
+        {
+            if (HasQuarantine(input))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Pins every table the execution reads, while no refresh commit is swapping one, and hands them
     /// to its scans through the arena (F188). The whole of a refresh transaction is then seen, or none
     /// of it, whichever of the execution's scans starts first.

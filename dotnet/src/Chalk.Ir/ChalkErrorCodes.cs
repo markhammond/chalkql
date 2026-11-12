@@ -236,6 +236,13 @@ public static class ChalkErrorCodes
     /// <summary>An operator failed while the query ran; the inner exception says why.</summary>
     public const string ExecutionFailed = nameof(ExecutionFailed);
 
+    /// <summary>
+    /// An access policy met data it could not decide for a row, and the statement's result is withheld
+    /// (F302, design 82). Nothing in ChalkQL failed; the reason is not reported, as it could quote a
+    /// value the policy hides.
+    /// </summary>
+    public const string PolicyIndeterminate = nameof(PolicyIndeterminate);
+
     // Sources.
 
     /// <summary>A source answered outside its contract.</summary>

@@ -508,6 +508,19 @@ code.
 
 **What to do:** See the inner exception.
 
+### PolicyIndeterminate
+
+An access policy met data it could not decide for a row, and the statement's result is withheld
+(`PolicyIndeterminateException`). A condition or a mask of the policy, or a source running one,
+could not be evaluated for a row, where that could not be settled closed: a mask that raised,
+through a host function declared `.Leakproof()` that broke its promise, say, or a source that raised
+on a table marked `PUSHDOWN_REQUIRED`. Nothing in ChalkQL failed. The exception names the table, the
+source's error class where there is one, and a correlation id; it never carries the reason, which
+could quote a value the policy hides.
+
+**What to do:** Register an `IIndeterminateDecisions` observer with `WithEntitlements` to be
+handed the reason under the same correlation id, and correct the mask, function or source it names.
+
 ## Sources
 
 Raised by a source, or by the engine about a source.

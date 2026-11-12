@@ -79,20 +79,27 @@ public final class ChalkOperatorTable {
           SqlFunctionCategory.SYSTEM);
 
   /**
-   * {@code $chalk$masked(mask, 'schema.table.column')}: the mask itself, around which the
-   * entitlement pass puts it so that an error raised computing it is reported without its own text
-   * (F300). Registration refuses a mask that can raise; this is what still holds should one misjudge.
-   * It is the pass's and in no operator table a statement resolves against, and the reserved
-   * {@code $chalk$} prefix keeps a statement or a descriptor from naming it.
+   * {@code $chalk$guarded(condition)}: the condition's own answer, or NULL for a row where evaluating
+   * it raised (F302, design 82). The entitlement pass puts it round a rule's condition in the
+   * sanitising projection, after the fold, so that a condition with no answer does not apply its
+   * rule. It is the pass's and in no operator table a statement resolves against, and the reserved
+   * {@code $chalk$} prefix keeps a statement or a descriptor from naming it. Dynamic, as far as the
+   * planner knows, so that nothing evaluates it while planning, which it could not: it is the
+   * executor's. It is deterministic, so projections still merge across it.
    */
-  public static final SqlFunction MASKED =
+  public static final SqlFunction GUARDED =
       new SqlFunction(
-          "$chalk$masked",
+          "$chalk$guarded",
           SqlKind.OTHER_FUNCTION,
-          ReturnTypes.ARG0,
+          ReturnTypes.BOOLEAN_NULLABLE,
           null,
-          OperandTypes.ANY_ANY,
-          SqlFunctionCategory.SYSTEM);
+          OperandTypes.BOOLEAN,
+          SqlFunctionCategory.SYSTEM) {
+        @Override
+        public boolean isDynamicFunction() {
+          return true;
+        }
+      };
 
   /**
    * {@code ILIKE} and {@code NOT ILIKE}, always (D316). Calcite keeps them in its POSTGRESQL library,

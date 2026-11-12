@@ -236,9 +236,11 @@ public final class EntitlementRegistration {
         // the policy author chose it. It may read the declared parents' columns too (§3.13, D228),
         // which is where the role half of a child's rule lives. Only the value a mask puts in the
         // result is checked below.
-        check(converter, typeFactory, qualified, from, where,
-            columnPath + ".rules[" + r + "].when", "the rule condition", rules.get(r).getWhen(),
-            null);
+        RexNode when =
+            check(converter, typeFactory, qualified, from, where,
+                columnPath + ".rules[" + r + "].when", "the rule condition", rules.get(r).getWhen(),
+                null);
+        refuseRaisingRestriction(column, r, when, typeFactory, where, columnPath);
         RexNode mask =
             checkOwnRow(converter, typeFactory, qualified, parents, where,
                 columnPath + ".rules[" + r + "].mask", "mask", rules.get(r).getMask(), declared,
@@ -565,6 +567,69 @@ public final class EntitlementRegistration {
   }
 
   /** {@code UNSPECIFIED} reads as {@code NONE}, exactly as the pass reads it (§3.2). */
+  /**
+   * A rule's condition that can raise, in a rule that withholds more than a rule after it or the
+   * column's {@code otherwise} (F302, design 82 §3). In the quarantine a condition that raises for a
+   * row has no answer, and its rule is not applied: the row falls to the next. Where the rule grants,
+   * that is closed; where it restricts, it would give the row something more open. The rules here no
+   * longer say whose role each is for (the tenancy compiler wrote that into the condition), so every
+   * rule after this one counts.
+   */
+  private static void refuseRaisingRestriction(
+      ColumnEntitlement column,
+      int r,
+      @Nullable RexNode when,
+      RelDataTypeFactory typeFactory,
+      String where,
+      String columnPath) {
+    RexNode raising = when == null ? null : Leakproof.offending(when);
+    if (raising == null) {
+      return;
+    }
+    List<DisclosureRule> rules = column.getRulesList();
+    Disclosure mine = normalise(rules.get(r).getThen());
+    for (int later = r + 1; later <= rules.size(); later++) {
+      boolean otherwise = later == rules.size();
+      Disclosure theirs = normalise(otherwise ? column.getOtherwise() : rules.get(later).getThen());
+      if (!moreOpen(theirs, mine)) {
+        continue;
+      }
+      throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
+          columnPath + ".rules[" + r + "].when",
+          "on " + where + ", the rule condition can raise an error depending on the row ("
+              + raises(typeFactory, raising) + "), and its rule discloses " + spelling(mine)
+              + " where "
+              + (otherwise ? "the column's otherwise" : "rules[" + later + "] after it")
+              + " discloses " + spelling(theirs) + ". A condition that raises for a row has no"
+              + " answer, and the row falls to what comes after, which here is more open. Put the"
+              + " condition in a rule that grants rather than withholds, or write it so that it"
+              + " cannot raise, with " + Leakproof.SPELLING + ". The text is: "
+              + rules.get(r).getWhen());
+    }
+  }
+
+  /** Whether {@code theirs} discloses more than {@code mine}; where the two do not compare, yes. */
+  private static boolean moreOpen(Disclosure theirs, Disclosure mine) {
+    if (theirs == mine || theirs == Disclosure.DISCLOSURE_NONE || mine == Disclosure.DISCLOSURE_FULL) {
+      return false;
+    }
+    if (theirs == Disclosure.DISCLOSURE_AGGREGATE_ONLY || mine == Disclosure.DISCLOSURE_AGGREGATE_ONLY) {
+      return true;
+    }
+    return openness(theirs) > openness(mine);
+  }
+
+  private static int openness(Disclosure disclosure) {
+    return switch (disclosure) {
+      case DISCLOSURE_NONE -> 0;
+      case DISCLOSURE_TEST -> 1;
+      case DISCLOSURE_MASKED -> 2;
+      case DISCLOSURE_FULL -> 3;
+      default -> 4;
+    };
+  }
+
   private static Disclosure normalise(Disclosure declared) {
     return declared == Disclosure.DISCLOSURE_UNSPECIFIED || declared == Disclosure.UNRECOGNIZED
         ? Disclosure.DISCLOSURE_NONE
@@ -835,20 +900,10 @@ public final class EntitlementRegistration {
             "on " + where + ", " + what + " is not boolean but " + name(typeFactory, actual)
                 + ". The text is: " + sql);
       }
-      // A condition of the policy is evaluated on rows the principal may not be shown, and on rows
-      // whose principal its rule does not concern: one that can raise there quotes a value in its
-      // error, or fails only where some row exists (F292, as F288 for a statement's own).
-      RexNode raising = Leakproof.offending(converted);
-      if (raising != null) {
-        throw new InvalidCatalogException(
-            ErrorCode.INVALID_ENTITLEMENT,
-            field,
-            "on " + where + ", " + what + " can raise an error depending on the row: "
-                + raises(typeFactory, raising) + ". A condition of the policy is evaluated on rows"
-                + " the principal may not be shown, where an error would quote a value and a"
-                + " failure would say a row exists. Write it with " + Leakproof.SPELLING + "."
-                + " The text is: " + sql);
-      }
+      // A condition of the policy may raise (F302, design 82): it runs in the quarantine, where a row
+      // whose condition raises is decided as having no answer and the statement does not fail. Only
+      // a rule's condition that could thereby fall through to a more open rule is refused, by the
+      // caller, which knows the rules around it.
       return converted;
     }
 

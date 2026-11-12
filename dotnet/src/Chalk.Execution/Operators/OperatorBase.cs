@@ -88,7 +88,7 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         {
             throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
         }
-        catch (ChalkException exception) when (exception is not ExecutionException)
+        catch (ChalkException exception) when (exception is not (ExecutionException or PolicyIndeterminateException))
         {
             exception.RaisedAt(Context.PlanDigest, Path);
             throw;
@@ -110,7 +110,7 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         {
             throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
         }
-        catch (ChalkException exception) when (exception is not ExecutionException)
+        catch (ChalkException exception) when (exception is not (ExecutionException or PolicyIndeterminateException))
         {
             exception.RaisedAt(Context.PlanDigest, Path);
             throw;
@@ -162,7 +162,7 @@ internal abstract class OperatorBase : IBatchOperator, IAsyncEnumerable<Columnar
         {
             throw new ExecutionException(Context.PlanDigest, Path, exception.Message, exception);
         }
-        catch (ChalkException exception) when (exception is not ExecutionException)
+        catch (ChalkException exception) when (exception is not (ExecutionException or PolicyIndeterminateException))
         {
             exception.RaisedAt(Context.PlanDigest, Path);
             throw;

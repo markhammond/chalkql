@@ -1025,9 +1025,10 @@ public final class PlannerPipeline implements AutoCloseable {
       }
     }
 
-    // The fences over entitled leaves have done their work once the search has chosen (F288): what
-    // is above each runs over the rows the entitlement admitted, and nothing after this sees one.
-    optimised = chalk.planner.plan.rel.ChalkEntitlementBarrier.strip(optimised);
+    // The fences over entitled leaves have done the search's work once it has chosen (F288): what is
+    // above each runs over the rows the entitlement admitted. Each stays, as the root of a quarantine
+    // (F302, design 82): the IR marks the subtree it stood over, and the executor treats a data error
+    // raised beneath as making the policy's decision for its row indeterminate.
 
     // ASOF joins priced again on the final plan's numbers (F198): the search priced each seek once,
     // at estimates that can be far from these, and a plain join chosen on them reads a whole table.

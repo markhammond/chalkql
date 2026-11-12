@@ -188,10 +188,12 @@ public sealed class PreparedQuery
         Func<ArrowSchema, ArrowSchema>? decorateSchema,
         Action<StatementRun>? beforeRun,
         Action<PlanResult>? checkPlan = null,
-        Func<PrepareReason, CancellationToken, ValueTask<PreparedQuery>>? prepareAgain = null)
+        Func<PrepareReason, CancellationToken, ValueTask<PreparedQuery>>? prepareAgain = null,
+        Action<StatementRun, IReadOnlyList<IndeterminateHeard>>? indeterminate = null)
     {
         _decorateSchema = decorateSchema;
         _beforeRun = beforeRun;
+        _indeterminate = indeterminate;
         _checkPlan = checkPlan;
         _prepareAgain = prepareAgain;
         if (decorateSchema is null)
@@ -213,6 +215,12 @@ public sealed class PreparedQuery
 
     private Func<ArrowSchema, ArrowSchema>? _decorateSchema;
     private Action<StatementRun>? _beforeRun;
+
+    /// <summary>
+    /// Handed, as each execution ends, what its access policy could not decide (F302, design 82); null
+    /// where nothing listens.
+    /// </summary>
+    private Action<StatementRun, IReadOnlyList<IndeterminateHeard>>? _indeterminate;
     private Action<PlanResult>? _checkPlan;
     private Func<PrepareReason, CancellationToken, ValueTask<PreparedQuery>>? _prepareAgain;
     private readonly IReadOnlyList<int> _prepareShape;
@@ -931,7 +939,8 @@ public sealed class PreparedQuery
             throw new ContextRequiredException(RequiredContext);
         }
         
-        _beforeRun?.Invoke(new StatementRun(bindings, PlanDigest, version));
+        var run = new StatementRun(bindings, PlanDigest, version);
+        _beforeRun?.Invoke(run);
 
         // One read: this execution runs the plan it finds here, whatever swaps in while it runs.
         var state = Volatile.Read(ref _state);
@@ -960,6 +969,11 @@ public sealed class PreparedQuery
             pool ?? _engine.Arenas,
             ct,
             _engine.Log);
+        if (_indeterminate is { } heard)
+        {
+            execution.HearIndeterminate(records => heard(run, records));
+        }
+
         if (clockParameter >= 0)
         {
             execution.UseClockSlots(SlotsOf(plan.Rendered.Slots, clockParameter));
@@ -1633,6 +1647,36 @@ public sealed class QueryExecution : IAsyncDisposable
     /// </summary>
     internal void ReadAt(Chalk.Sources.RetainedTables held) => _readAt = held;
 
+    /// <summary>
+    /// Has this execution hand <paramref name="heard"/> what its access policy could not decide, as it
+    /// ends, whether it ran out or threw (F302, design 82): before an exception reaches the caller.
+    /// </summary>
+    internal void HearIndeterminate(Action<IReadOnlyList<IndeterminateHeard>> heard) =>
+        _heardIndeterminate = heard;
+
+    private Action<IReadOnlyList<IndeterminateHeard>>? _heardIndeterminate;
+
+    /// <summary>A ledger's record as the decorating extension hears it, its reason past the executor's wrapping.</summary>
+    private static IndeterminateHeard Heard(Chalk.Sources.IndeterminateRecord record) =>
+        new(
+            record.CorrelationId,
+            record.Tables,
+            record.Resolution switch
+            {
+                Chalk.Sources.IndeterminateResolution.RowsNotAdmitted => IndeterminateSettled.RowsNotAdmitted,
+                Chalk.Sources.IndeterminateResolution.RuleNotApplied => IndeterminateSettled.RuleNotApplied,
+                Chalk.Sources.IndeterminateResolution.EvaluatedHere => IndeterminateSettled.EvaluatedHere,
+                _ => IndeterminateSettled.StatementWithheld,
+            },
+            record.Occurrences,
+            Innermost(record.Cause).Message,
+            record.Cause,
+            record.AtSource,
+            record.SqlState);
+
+    private static Exception Innermost(Exception error) =>
+        error is Chalk.Sources.ExecutionException { InnerException: { } inner } ? Innermost(inner) : error;
+
     private Chalk.Sources.RetainedTables? _readAt;
 
     /// <summary>
@@ -1678,6 +1722,8 @@ public sealed class QueryExecution : IAsyncDisposable
             Stats.RecordArenaPool(_pool.Name);
         }
         arena.ReadAt = _readAt;
+        var ledger = _compiled.Quarantined ? new Chalk.Sources.IndeterminateLedger() : null;
+        arena.Indeterminate = ledger;
         try
         {
             await foreach (var batch in _compiled
@@ -1692,6 +1738,11 @@ public sealed class QueryExecution : IAsyncDisposable
             PinnedCommit = arena.PinnedCommit;
             arena.PinnedCommit = -1;
             arena.ReadAt = null;
+            arena.Indeterminate = null;
+            if (ledger?.Drain() is { Count: > 0 } decided)
+            {
+                _heardIndeterminate?.Invoke([.. decided.Select(Heard)]);
+            }
             if (_hostArena is null)
             {
                 _pool.Return(arena, transient);

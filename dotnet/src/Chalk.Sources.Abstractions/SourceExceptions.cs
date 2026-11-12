@@ -222,3 +222,37 @@ public sealed class InvalidUtf8Exception : ChalkException
     /// <summary>The row within the chunk or batch being written.</summary>
     public long Row { get; }
 }
+
+/// <summary>
+/// An access policy met data it could not decide for a row, and the statement's result is withheld
+/// (F302, design 82): a condition or a mask of the policy, or a source running one, could not be
+/// evaluated for a row, where that could not be settled closed without withholding the result.
+/// Nothing in ChalkQL failed. The reason is not reported, as it could quote a value the policy hides;
+/// a host that registered an observer of indeterminate decisions is handed it there, under the same
+/// <see cref="CorrelationId"/>.
+/// </summary>
+public sealed class PolicyIndeterminateException : ChalkException
+{
+    /// <summary>A withheld result: <see cref="ChalkErrorCodes.PolicyIndeterminate"/>.</summary>
+    public PolicyIndeterminateException(string tables, Guid correlationId, string? sqlState)
+        : base(
+            ChalkErrorCodes.PolicyIndeterminate,
+            $"The policy on {tables} could not reach a decision for a row, so its result is withheld. "
+            + "The reason is not reported, as it could quote a value the policy hides. "
+            + $"Correlation {correlationId}.")
+    {
+        Tables = tables;
+        CorrelationId = correlationId;
+        SqlState = sqlState;
+    }
+
+    /// <summary>The entitled tables whose policy reached no decision, <c>schema.table</c>.</summary>
+    public string Tables { get; }
+
+    /// <summary>The execution's, shared with every decision a host's observer is handed for it.</summary>
+    public Guid CorrelationId { get; }
+
+    /// <summary>The source's error class where a source raised and its provider gives one; else null.</summary>
+    public string? SqlState { get; }
+}
+

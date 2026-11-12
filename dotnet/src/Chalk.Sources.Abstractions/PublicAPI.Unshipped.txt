@@ -573,3 +573,8 @@ Chalk.Sources.SourceRefreshKind.Advance = 4 -> Chalk.Sources.SourceRefreshKind
 Chalk.Sources.SourceRefreshKind.Commit = 5 -> Chalk.Sources.SourceRefreshKind
 Chalk.Sources.SourceRefreshKind.Delete = 3 -> Chalk.Sources.SourceRefreshKind
 Chalk.Sources.SourceRefreshKind.Upsert = 2 -> Chalk.Sources.SourceRefreshKind
+Chalk.Sources.PolicyIndeterminateException
+Chalk.Sources.PolicyIndeterminateException.CorrelationId.get -> System.Guid
+Chalk.Sources.PolicyIndeterminateException.PolicyIndeterminateException(string! tables, System.Guid correlationId, string? sqlState) -> void
+Chalk.Sources.PolicyIndeterminateException.SqlState.get -> string?
+Chalk.Sources.PolicyIndeterminateException.Tables.get -> string!

@@ -252,6 +252,12 @@ public sealed class ExecutionArena : IDisposable
     internal RetainedTables? ReadAt { get; set; }
 
     /// <summary>
+    /// What this execution's access policy could not decide (F302, design 82): set as the execution
+    /// starts and read when it ends, null between executions and where nothing listens.
+    /// </summary>
+    internal IndeterminateLedger? Indeterminate { get; set; }
+
+    /// <summary>
     /// Claims the arena for one execution and points its high-water mark at
     /// <paramref name="stats"/>. Paired with <see cref="EndExecution"/> in a <c>finally</c>.
     /// </summary>
