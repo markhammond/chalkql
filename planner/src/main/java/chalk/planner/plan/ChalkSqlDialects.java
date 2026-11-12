@@ -1,6 +1,7 @@
 package chalk.planner.plan;
 
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.sql.SqlAbstractDateTimeLiteral;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlBinaryOperator;
@@ -154,6 +155,12 @@ public final class ChalkSqlDialects {
       super.unparseCall(writer, call, leftPrec, rightPrec);
     }
 
+    /** A cast is written as the plan has it (F303): see {@link Ansi#supportsImplicitTypeCoercion}. */
+    @Override
+    public boolean supportsImplicitTypeCoercion(RexCall call) {
+      return false;
+    }
+
     @Override
     public @Nullable SqlNode getCastSpec(RelDataType type) {
       SqlNode chalk = castSpec(this, type);
@@ -221,6 +228,12 @@ public final class ChalkSqlDialects {
       super.unparseCall(writer, call, leftPrec, rightPrec);
     }
 
+    /** A cast is written as the plan has it (F303): see {@link Ansi#supportsImplicitTypeCoercion}. */
+    @Override
+    public boolean supportsImplicitTypeCoercion(RexCall call) {
+      return false;
+    }
+
     @Override
     public @Nullable SqlNode getCastSpec(RelDataType type) {
       SqlNode chalk = castSpec(this, type);
@@ -267,6 +280,12 @@ public final class ChalkSqlDialects {
       super.unparseCall(writer, call, leftPrec, rightPrec);
     }
 
+    /** A cast is written as the plan has it (F303): see {@link Ansi#supportsImplicitTypeCoercion}. */
+    @Override
+    public boolean supportsImplicitTypeCoercion(RexCall call) {
+      return false;
+    }
+
     @Override
     public @Nullable SqlNode getCastSpec(RelDataType type) {
       SqlNode chalk = castSpec(this, type);
@@ -280,6 +299,28 @@ public final class ChalkSqlDialects {
   }
 
   /** Whether a dialect is one Chalk defined, for diagnostics. */
+  /** ANSI, keeping the plan's casts (F303). */
+  public static final class Ansi extends org.apache.calcite.sql.dialect.AnsiSqlDialect {
+    public Ansi(Context context) {
+      super(context);
+    }
+
+    /**
+     * A cast in a comparison is written out (F303). Calcite's writer drops a {@code CAST} of a
+     * character value compared with something not cast wherever the dialect says it coerces
+     * implicitly, which by default it says of every character value: {@code CAST(level AS INTEGER) <= 2}
+     * went out as {@code level <= 2}. DuckDB and PostgreSQL refuse that; SQLite compares it as text,
+     * where {@code '10' <= '2'} is true, and answers wrongly without a word. No dialect Chalk builds
+     * claims it: a profile's {@code implicit_coercion_matches} is about where a cast must be added,
+     * and a cast the plan already has is never taken away. A stock Calcite dialect, built for a preset
+     * Chalk does not tune, keeps Calcite's own answer.
+     */
+    @Override
+    public boolean supportsImplicitTypeCoercion(RexCall call) {
+      return false;
+    }
+  }
+
   public static boolean isChalkDefined(SqlDialect dialect) {
     return dialect instanceof Sqlite || dialect instanceof DuckDb;
   }

@@ -21,7 +21,6 @@ import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlSelect;
-import org.apache.calcite.sql.dialect.AnsiSqlDialect;
 import org.apache.calcite.sql.dialect.PostgresqlSqlDialect;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.validate.SqlConformanceEnum;
@@ -66,11 +65,11 @@ public final class SourceDialects {
           SqlDialect.DatabaseProduct.DUCKDB));
       case "postgresql", "postgres" -> new ChalkSqlDialects.Postgres(context.withDatabaseProduct(
           SqlDialect.DatabaseProduct.POSTGRESQL));
-      case "ansi" -> new AnsiSqlDialect(context);
+      case "ansi" -> new ChalkSqlDialects.Ansi(context);
       default -> {
         SqlDialect.DatabaseProduct product = parseProduct(name);
         SqlDialect stock = product == null ? null : stockDialect(product, context);
-        yield stock != null ? stock : new AnsiSqlDialect(context);
+        yield stock != null ? stock : new ChalkSqlDialects.Ansi(context);
       }
     };
   }

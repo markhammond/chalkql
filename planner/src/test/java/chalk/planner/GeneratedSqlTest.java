@@ -305,6 +305,25 @@ class GeneratedSqlTest {
   }
 
   /**
+   * F303: a cast of a string compared with a value is written out in every dialect Chalk builds.
+   * Calcite's writer dropped it, and {@code l_comment > 2} is a refusal in DuckDB and PostgreSQL and
+   * a comparison of text in SQLite, where {@code '10' > '2'} is false.
+   */
+  @Test
+  void a_cast_of_a_string_in_a_comparison_is_written_out() {
+    for (DialectProfile profile :
+        List.of(
+            TestCatalogs.sqliteProfile(),
+            TestCatalogs.duckDbProfile(),
+            TestCatalogs.postgresProfile(),
+            ansiProfile())) {
+      String sql =
+          inDialect(profile, "SELECT l_orderkey FROM db.lineitem WHERE CAST(l_comment AS INTEGER) > 2");
+      assertThat(sql).as(profile.getDialect()).containsIgnoringCase("CAST(\"l_comment\" AS");
+    }
+  }
+
+  /**
    * The generated SQL for one statement in one dialect, with the capabilities a source under that
    * profile could honestly declare: the catalog validator refuses a LIKE shape where the profile's
    * collation is not Chalk's, which is what the PostgreSQL preset says of a cluster with a locale
