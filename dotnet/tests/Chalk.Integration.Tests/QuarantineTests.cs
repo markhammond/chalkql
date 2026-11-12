@@ -276,6 +276,30 @@ public sealed class QuarantineTests(SharedSidecar sidecar)
         Assert.IsNotType<PolicyIndeterminateException>(nested);
     }
 
+    /// Maintained, the row predicate that casts admits what converts and passes at every update: a report
+    /// added whose level does not convert is not admitted, and the update does not fail.
+    /// </summary>
+    [Fact]
+    public async Task A_maintained_view_admits_what_converts_and_passes_at_each_update()
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        await using var fixture = await Fixture.CreateAsync(
+            sidecar, new TableEntitlementDescriptor { RowPredicate = "CAST(Level AS INTEGER) <= 2" }, ExecutionEngine.Vectorised);
+        await using var maintained = await fixture.MaintainAsync("SELECT ReportId FROM s.reports");
+
+        var first = await maintained.UpdateAsync([], default, fixture.Engine.Version, whole: false, Ct);
+        Assert.Equal(["R1"], Keys(first.Now));
+
+        await fixture.Engine.RefreshAsync(
+            r => r.Upsert(fixture.Poco, "reports", (IReadOnlyList<Report>)[new("R4", "Y", "fourth", 4.0), new("R5", "2", "fifth", 5.0)]),
+            Ct);
+        var next = await maintained.UpdateAsync([], default, fixture.Engine.Version, whole: false, Ct);
+        Assert.Equal(["R5"], Keys(next.Now));
+    }
+
+    private static string[] Keys(Apache.Arrow.RecordBatch batch) =>
+        [.. batch.ToRows().Select(r => Convert.ToString(r[0], CultureInfo.InvariantCulture)!).Order(StringComparer.Ordinal)];
+
     private sealed class Decisions : IIndeterminateDecisions
     {
         public List<IndeterminateDecision> Seen { get; } = [];
@@ -296,14 +320,18 @@ public sealed class QuarantineTests(SharedSidecar sidecar)
     {
         private ChalkEngine _engine = null!;
 
+        public ChalkEngine Engine => _engine;
+
+        public PocoSource Poco { get; private set; } = null!;
+
         public static async Task<Fixture> CreateAsync(
             SharedSidecar sidecar, TableEntitlementDescriptor descriptor, ExecutionEngine executor)
         {
-            var fixture = new Fixture();
+            var fixture = new Fixture { Poco = Source(descriptor) };
             fixture._engine = await ChalkEngine.CreateAsync(new ChalkEngineOptions
             {
                 ContextId = "quarantine",
-                Sources = [Source(descriptor)],
+                Sources = [fixture.Poco],
                 Planner = sidecar.CreatePlanner(),
                 Execution = new ExecutionOptions { Engine = executor },
                 Functions = registry => registry.AddScalar<string, string>(
@@ -324,16 +352,24 @@ public sealed class QuarantineTests(SharedSidecar sidecar)
 
         public ValueTask DisposeAsync() => _engine.DisposeAsync();
 
+        /// <summary>The statement maintained as a view's is, keyed by its first column.</summary>
+        public async Task<MaintainedQuery> MaintainAsync(string sql)
+        {
+            var prepared = await _engine.WithEntitlements().PrepareAsync(sql, Context, ct: Ct);
+            return await prepared.Query.MaintainAsync([], -1, [0], Ct);
+        }
+
+        private static RequestContext Context => new()
+        {
+            Lists = new Dictionary<string, ContextRelation>(StringComparer.Ordinal)
+            {
+                ["unused"] = new() { Columns = ["id"], Rows = [[1]], ColumnTypes = [ChalkType.Int32()] },
+            },
+        };
+
         private async Task<string[]> RunAsync(EntitledEngine entitled, string sql)
         {
-            var context = new RequestContext
-            {
-                Lists = new Dictionary<string, ContextRelation>(StringComparer.Ordinal)
-                {
-                    ["unused"] = new() { Columns = ["id"], Rows = [[1]], ColumnTypes = [ChalkType.Int32()] },
-                },
-            };
-            var prepared = await entitled.PrepareAsync(sql, context, ct: Ct);
+            var prepared = await entitled.PrepareAsync(sql, Context, ct: Ct);
             var rows = new List<string>();
             await using var execution = await _engine.ExecuteAsync(prepared.Query, ct: Ct);
             await foreach (var batch in execution.Batches.WithCancellation(Ct))
@@ -354,7 +390,7 @@ public sealed class QuarantineTests(SharedSidecar sidecar)
 
         private static PocoSource Source(TableEntitlementDescriptor descriptor) =>
             new PocoSourceBuilder("s", "s")
-                .AddTable("reports", Reports, t => t.UniqueKey(x => x.ReportId).Entitlement(descriptor))
+                .AddTable("reports", Reports, t => t.UniqueKey(x => x.ReportId).Keyed(x => x.ReportId).Entitlement(descriptor))
                 .AddFunction("boom", f => f.Scalar<string, string>("s").Strict().Leakproof().Client())
                 .Build();
     }
