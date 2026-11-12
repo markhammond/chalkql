@@ -72,6 +72,19 @@ internal sealed class RemoteQueryOperator : OperatorBase
     /// <summary>This read, as a standing view over a database keeps it (D340): its place and its tables.</summary>
     private readonly ReadSite _site;
 
+    /// <summary>
+    /// The tables of the quarantine this query stands in (F302, design 82), or null outside one. In one,
+    /// a failure the source raises is the policy's decision left indeterminate, and is settled here.
+    /// </summary>
+    private readonly string? _quarantine;
+
+    /// <summary>
+    /// The pushed plan compiled to run here, over plain scans, for a source that raised before it sent
+    /// a row (design 82 §6). Null outside a quarantine, and where the policy must be enforced at the
+    /// source.
+    /// </summary>
+    private readonly OperatorFactory? _fallback;
+
     public RemoteQueryOperator(
         OperatorContext context,
         string path,
@@ -82,10 +95,14 @@ internal sealed class RemoteQueryOperator : OperatorBase
         TimeSpan? timeout,
         ArrowSchema schema,
         IReadOnlyList<ChalkType> columnTypes,
-        string? redactedQueryText = null)
+        string? redactedQueryText = null,
+        string? quarantine = null,
+        OperatorFactory? fallback = null)
         : base(context, schema, columnTypes, path)
     {
         _source = source;
+        _quarantine = quarantine;
+        _fallback = fallback;
         _query = query;
         _redactedQueryText = redactedQueryText;
         _site = new ReadSite(path, source.SourceId, PlanTables.Of(query.PushedPlan));
@@ -173,47 +190,108 @@ internal sealed class RemoteQueryOperator : OperatorBase
 
         Context.Stats.AddRemoteCalls(1);
 
-        // One place in the queue for this stream, released when it ends however it ends (D107).
-        using var lease = await Context.RemoteGate
-            .EnterAsync(_source.SourceId, ct)
-            .ConfigureAwait(false);
-
         var first = true;
         var rows = 0L;
-        await foreach (var batch in RemoteFetch.RunAsync(
-            _source,
-            request,
-            Context,
-            Context.Settings.RemotePrefetchDepth,
-            ct,
-            _redactedQueryText))
+        Exception? raised = null;
+
+        // One place in the queue for this stream, released when it ends however it ends (D107), and
+        // before a fallback runs, which reads the same source.
+        var lease = await Context.RemoteGate
+            .EnterAsync(_source.SourceId, ct)
+            .ConfigureAwait(false);
+        try
         {
+            var batches = RemoteFetch.RunAsync(
+                _source,
+                request,
+                Context,
+                Context.Settings.RemotePrefetchDepth,
+                ct,
+                _redactedQueryText).GetAsyncEnumerator(ct);
             try
             {
-                if (first)
+                while (true)
                 {
-                    first = false;
-                    if (!ArrowTypeMapping.AreEquivalent(Schema, batch.Schema))
+                    if (_quarantine is null)
                     {
-                        throw new SourceContractException(
-                            ChalkErrorCodes.SourceContract,
-                            _source.SourceId,
-                            Subject,
-                            $"the first batch has schema {ArrowTypeMapping.DescribeArrow(batch.Schema)}, "
-                            + $"not the requested {ArrowTypeMapping.DescribeArrow(Schema)}.");
+                        if (!await batches.MoveNextAsync().ConfigureAwait(false))
+                        {
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            if (!await batches.MoveNextAsync().ConfigureAwait(false))
+                            {
+                                break;
+                            }
+                        }
+                        catch (Exception error) when (Settles(error))
+                        {
+                            raised = error;
+                            break;
+                        }
+                    }
+
+                    var batch = batches.Current;
+                    try
+                    {
+                        if (first)
+                        {
+                            first = false;
+                            if (!ArrowTypeMapping.AreEquivalent(Schema, batch.Schema))
+                            {
+                                throw new SourceContractException(
+                                    ChalkErrorCodes.SourceContract,
+                                    _source.SourceId,
+                                    Subject,
+                                    $"the first batch has schema {ArrowTypeMapping.DescribeArrow(batch.Schema)}, "
+                                    + $"not the requested {ArrowTypeMapping.DescribeArrow(Schema)}.");
+                            }
+                        }
+
+                        Context.Stats.AddRowsFetched(batch.Length);
+                        rows += batch.Length;
+                        keeper?.Keep(_site, values!, batch);
+                        ArrowBatchViews.Fill(_output, batch, ColumnTypes, _children);
+                        yield return _output;
+                    }
+                    finally
+                    {
+                        batch.Dispose();
                     }
                 }
-
-                Context.Stats.AddRowsFetched(batch.Length);
-                rows += batch.Length;
-                keeper?.Keep(_site, values!, batch);
-                ArrowBatchViews.Fill(_output, batch, ColumnTypes, _children);
-                yield return _output;
             }
             finally
             {
-                batch.Dispose();
+                await batches.DisposeAsync().ConfigureAwait(false);
             }
+        }
+        finally
+        {
+            lease.Dispose();
+        }
+
+        if (raised is not null)
+        {
+            // In a quarantine the source's failure is the policy's decision left indeterminate. Before
+            // a row has gone up, the pushed plan runs here instead and decides it; after, or where the
+            // policy must be enforced at the source, the result is withheld.
+            if (!first || _fallback is null)
+            {
+                throw QuarantineOperator.Withhold(Context, _quarantine!, raised);
+            }
+
+            Context.Arena.Indeterminate?.Record(_quarantine!, IndeterminateResolution.EvaluatedHere, 1, raised);
+            await using var local = _fallback(Context);
+            await foreach (var batch in local.ExecuteAsync(ct).ConfigureAwait(false))
+            {
+                yield return batch;
+            }
+
+            yield break;
         }
 
         // D98, D101: no cross-source snapshot, so a host is told which moment each source was read
@@ -221,6 +299,13 @@ internal sealed class RemoteQueryOperator : OperatorBase
         Context.Stats.RecordFetch(_source.SourceId, rows, Context.Settings.TimeProvider.GetUtcNow());
         keeper?.Kept(_site, values!);
     }
+
+    /// <summary>
+    /// What a quarantine settles of what the source raised: its own failure, which may quote a value,
+    /// and a data error. Not a timeout, a cancellation or the engine's own refusals.
+    /// </summary>
+    private static bool Settles(Exception error) =>
+        error is SourceExecutionException || IndeterminateLedger.IsDataError(error);
 
     /// <summary>
     /// What this read is bound with, for a keeper to tell one run from another: the values the provider

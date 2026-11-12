@@ -43,7 +43,7 @@ internal sealed class QuarantineOperator : OperatorBase
                 }
                 catch (Exception error) when (IndeterminateLedger.IsDataError(error))
                 {
-                    throw Withheld(error);
+                    throw Withhold(Context, _tables, error);
                 }
 
                 if (!moved)
@@ -60,11 +60,15 @@ internal sealed class QuarantineOperator : OperatorBase
         }
     }
 
-    private PolicyIndeterminateException Withheld(Exception cause)
+    /// <summary>
+    /// The exception a withheld result throws, quoting nothing of <paramref name="cause"/>, which is
+    /// recorded for the host's observer instead.
+    /// </summary>
+    internal static PolicyIndeterminateException Withhold(OperatorContext context, string tables, Exception cause)
     {
-        var ledger = Context.Arena.Indeterminate;
-        ledger?.Record(_tables, IndeterminateResolution.StatementWithheld, 1, cause);
+        var ledger = context.Arena.Indeterminate;
+        ledger?.Record(tables, IndeterminateResolution.StatementWithheld, 1, cause);
         return new PolicyIndeterminateException(
-            _tables, ledger?.CorrelationId ?? Guid.NewGuid(), IndeterminateLedger.SqlStateOf(cause));
+            tables, ledger?.CorrelationId ?? Guid.NewGuid(), IndeterminateLedger.SqlStateOf(cause));
     }
 }
