@@ -79,6 +79,22 @@ public final class ChalkOperatorTable {
           SqlFunctionCategory.SYSTEM);
 
   /**
+   * {@code $chalk$masked(mask, 'schema.table.column')}: the mask itself, around which the
+   * entitlement pass puts it so that an error raised computing it is reported without its own text
+   * (F300). Registration refuses a mask that can raise; this is what still holds should one misjudge.
+   * It is the pass's and in no operator table a statement resolves against, and the reserved
+   * {@code $chalk$} prefix keeps a statement or a descriptor from naming it.
+   */
+  public static final SqlFunction MASKED =
+      new SqlFunction(
+          "$chalk$masked",
+          SqlKind.OTHER_FUNCTION,
+          ReturnTypes.ARG0,
+          null,
+          OperandTypes.ANY_ANY,
+          SqlFunctionCategory.SYSTEM);
+
+  /**
    * {@code ILIKE} and {@code NOT ILIKE}, always (D316). Calcite keeps them in its POSTGRESQL library,
    * but Chalk defines what ILIKE means itself — LIKE with both sides folded as LOWER folds — so it is
    * not PostgreSQL's to lend, and asking for that library would bring every other PostgreSQL function

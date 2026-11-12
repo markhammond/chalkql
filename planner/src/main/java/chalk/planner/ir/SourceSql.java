@@ -245,8 +245,28 @@ public final class SourceSql {
      * whose wrong answer would therefore be silent — is evaluated the way Chalk evaluates it.
      */
     public static RelNode forDialect(RelNode pushed, SqlDialect dialect) {
+      // A mask the host lets travel (D153) is written as itself: the wrapper that redacts a mask's
+      // error is the client's (F300), and no source has it. Registration has already refused a mask
+      // that can raise, which is what holds at the source.
+      RelNode unwrapped = substitute(pushed, rel -> new Unmasked());
       SqlOperator integerDivision = SourceDialects.integerDivision(dialect);
-      return integerDivision == null ? pushed : substitute(pushed, integerDivision);
+      return integerDivision == null
+          ? unwrapped
+          : substitute(
+              unwrapped,
+              rel -> new IntegerDivision(integerDivision, rel.getCluster().getRexBuilder()));
+    }
+
+    /** {@code $chalk$masked(mask, label)} written as the mask. */
+    private static final class Unmasked extends RexShuttle {
+      @Override
+      public RexNode visitCall(RexCall call) {
+        RexNode visited = super.visitCall(call);
+        return visited instanceof RexCall masked
+                && masked.getOperator() == chalk.planner.plan.ChalkOperatorTable.MASKED
+            ? masked.getOperands().get(0)
+            : visited;
+      }
     }
 
     /**
@@ -254,14 +274,15 @@ public final class SourceSql {
      * no "apply a {@code RexShuttle} to a whole tree" helper: {@code RelNode.accept(RexShuttle)}
      * rewrites one node's own expressions and leaves its inputs alone.
      */
-    private static RelNode substitute(RelNode rel, SqlOperator integerDivision) {
+    private static RelNode substitute(
+        RelNode rel, java.util.function.Function<RelNode, RexShuttle> shuttle) {
       RelNode rewritten = rel;
       List<RelNode> inputs = rel.getInputs();
       if (!inputs.isEmpty()) {
         List<RelNode> substituted = new ArrayList<>(inputs.size());
         boolean changed = false;
         for (RelNode input : inputs) {
-          RelNode next = substitute(input, integerDivision);
+          RelNode next = substitute(input, shuttle);
           changed |= next != input;
           substituted.add(next);
         }
@@ -270,8 +291,7 @@ public final class SourceSql {
         }
       }
 
-      return rewritten.accept(
-          new IntegerDivision(integerDivision, rel.getCluster().getRexBuilder()));
+      return rewritten.accept(shuttle.apply(rel));
     }
 
     /**

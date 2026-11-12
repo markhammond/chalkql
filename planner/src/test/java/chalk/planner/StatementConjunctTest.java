@@ -215,7 +215,9 @@ class StatementConjunctTest {
     assertThat(result.entitledLeaves().get(0).of(2)).isEqualTo(Disclosed.PER_ROW);
     assertThat(result.physicalPlanText())
         .contains("CASE(=($1, 'S'), $2")
-        .contains("=(SUBSTRING($1, 1, 1), 'S')");
+        // The mask is the client's wrapped one (F300), which redacts an error raised computing it.
+        .contains("=($chalk$masked(SUBSTRING($1, 1, 1), ")
+        .contains("), 'S')");
   }
 
   @Test

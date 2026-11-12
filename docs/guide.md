@@ -2891,6 +2891,12 @@ two fields in the select list above cost one classification per row, not two. Th
 expression written more than once within one step — a built-in call, a `CAST`, a `CASE`,
 an `IN` or a field access — unless something inside it is `Volatile()`.
 
+Within one expression, a part a condition guards is evaluated only for the rows the condition
+leaves to it: a `CASE` branch for the rows that take it, a later `WHEN` for the rows no earlier
+one took, and an `AND`'s or an `OR`'s later operand for the rows the earlier ones left
+undecided. So `CASE WHEN Divisor <> 0 THEN 10 / Divisor END` and
+`Divisor <> 0 AND 10 / Divisor > 2` divide no row by zero.
+
 Under entitlements (see [Entitlements](#entitlements--row-and-column-disclosure)), a
 composite-valued function is a client body like any other. It is handed each column as
 the principal may see it, including a mask or a placeholder. The composite, and each of
@@ -3676,12 +3682,28 @@ whether it is in the statement's own `WHERE` or put round it, as in
 division, arithmetic and most functions. So an error never quotes a value from a row the
 principal is not shown, and whether a statement fails says nothing about such a row.
 
-The conditions that cannot leak still reach the source and its indexes: comparisons,
-`AND`, `OR` and `NOT`, the `IS` tests, `IN` lists, `LIKE`, `COALESCE`, `CASE`,
-`UPPER`, `LOWER` and `TRIM` over them, a lossless cast, and anything that reads no
-column, such as `@now - INTERVAL '10' MINUTE`. So does a join on such a condition, an
-aggregate, a sort and a bound. The rest is evaluated here, over the rows the source
-returned.
+The conditions that cannot leak still reach the source and its indexes. They are written
+with comparisons, `AND`, `OR` and `NOT`, the `IS` tests, `IN` lists, `LIKE`, a lossless
+cast, literals and context values, and over those `COALESCE`, `CASE`, `UPPER`, `LOWER`,
+`TRIM`, concatenation, `CHAR_LENGTH`, `FINGERPRINT`, `PRESENT`, `SUBSTRING` with a literal
+length, `ROUND`, `FLOOR` and `CEIL` of a floating-point value, `FLOOR` and `CEIL` of a date
+or a timestamp, and any function you declared `.Leakproof()`. Anything that reads no
+column, such as `@now - INTERVAL '10' MINUTE`, also cannot leak. A join on such a
+condition, an aggregate, a sort and a bound reach the source too. The rest is evaluated
+here, over the rows the source returned.
+
+**A policy's own expressions cannot raise.** A rule's condition, a row predicate and a
+path's predicates are evaluated on rows the principal may not be shown. A mask and a
+placeholder are evaluated in place of the value their rule hides. An error in any of them
+could quote that value, or say that a row exists. So each must be written with what
+cannot raise, the list above, and one that can is refused when the engine is created. The
+refusal names the rule's place and what can fail, for example
+`…(SourceIdentity).rules[0].when: … can raise an error depending on the row: a cast to I32
+can fail`. `.Leakproof()` is your promise that a function raises for no row and says
+nothing of one beyond its value. Nothing can check it, so Chalk relies on it, as
+PostgreSQL relies on `LEAKPROOF`. As a last line, a mask that reads the row is computed so
+that, should it fail all the same, the error names the mask's column and not the value:
+`The mask on main.reports.SourceIdentity could not be computed for a row.`
 
 **Masks do not travel.** Take an expression that is not a bare column reference, and
 that reads a column this principal may not see in full. It never enters a source's

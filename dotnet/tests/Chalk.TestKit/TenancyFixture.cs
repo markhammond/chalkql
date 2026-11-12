@@ -1270,6 +1270,8 @@ public sealed class TenancyFixture
             .AddFunction("echo_with_length", f => f
                 .Scalar<string, Echoed>("s")
                 .Strict()
+                // A mask may call it (F300): it answers what it is handed and cannot raise.
+                .Leakproof()
                 .Client())
             .AddFunction("amount_summary", f => f
                 .Aggregate<long, AmountSummary>("x")

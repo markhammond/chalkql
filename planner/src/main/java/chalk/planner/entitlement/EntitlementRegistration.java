@@ -835,6 +835,20 @@ public final class EntitlementRegistration {
             "on " + where + ", " + what + " is not boolean but " + name(typeFactory, actual)
                 + ". The text is: " + sql);
       }
+      // A condition of the policy is evaluated on rows the principal may not be shown, and on rows
+      // whose principal its rule does not concern: one that can raise there quotes a value in its
+      // error, or fails only where some row exists (F292, as F288 for a statement's own).
+      RexNode raising = Leakproof.offending(converted);
+      if (raising != null) {
+        throw new InvalidCatalogException(
+            ErrorCode.INVALID_ENTITLEMENT,
+            field,
+            "on " + where + ", " + what + " can raise an error depending on the row: "
+                + raises(typeFactory, raising) + ". A condition of the policy is evaluated on rows"
+                + " the principal may not be shown, where an error would quote a value and a"
+                + " failure would say a row exists. Write it with " + Leakproof.SPELLING + "."
+                + " The text is: " + sql);
+      }
       return converted;
     }
 
@@ -848,7 +862,34 @@ public final class EntitlementRegistration {
               + " same row shape. The text is: " + sql);
     }
 
+    // A mask and a placeholder are evaluated on the rows their rule concerns, in place of the value
+    // the rule hides: one that can raise there quotes that very value in its error (F300).
+    RexNode raising = Leakproof.offending(converted);
+    if (raising != null) {
+      throw new InvalidCatalogException(
+          ErrorCode.INVALID_ENTITLEMENT,
+          field,
+          "on " + where + ", " + (what.startsWith("the ") ? what : "the " + what)
+              + " can raise an error depending on the row: "
+              + raises(typeFactory, raising) + ". It is evaluated in place of the value its rule"
+              + " hides, and an error there would quote that value. Write it with "
+              + Leakproof.SPELLING + ". The text is: " + sql);
+    }
+
     return converted;
+  }
+
+  /** What in a condition can raise, in the author's words. */
+  private static String raises(RelDataTypeFactory typeFactory, RexNode raising) {
+    if (!(raising instanceof org.apache.calcite.rex.RexCall call)) {
+      return "it reads a value that can fail";
+    }
+    return switch (call.getKind()) {
+      case CAST, SAFE_CAST -> "a cast to " + name(typeFactory, call.getType()) + " can fail";
+      case DIVIDE, MOD -> "a division can divide by zero";
+      case PLUS, MINUS, TIMES, MINUS_PREFIX -> "arithmetic can overflow";
+      default -> call.getOperator().getName() + " can raise";
+    };
   }
 
   /**

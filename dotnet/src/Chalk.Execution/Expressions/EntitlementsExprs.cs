@@ -156,3 +156,53 @@ internal sealed class PresentExpr : VectorExprBase
         return Scratch.Finish(length, 0);
     }
 }
+
+/// <summary>
+/// <c>$chalk$masked(mask, label)</c> (F300): the mask's own value, and an error raised computing it
+/// reported as the mask on the labelled column having failed, without the error's text. The mask is
+/// evaluated in place of the value its rule hides, so an error from a cast or a function inside it
+/// could quote that value. Registration refuses a mask that can raise; this holds should that
+/// judgement miss. Only a data error is redacted — cancellation and the engine's own refusals pass
+/// through as they are.
+/// </summary>
+internal sealed class MaskedExpr : VectorExprBase
+{
+    private readonly IVectorExpr _mask;
+    private readonly string _label;
+
+    public MaskedExpr(ChalkType type, IVectorExpr mask, string label)
+        : base(type)
+    {
+        _mask = mask;
+        _label = label;
+    }
+
+    /// <summary>The column the planner named in the wrapper's second argument, a literal.</summary>
+    internal static string LabelOf(Chalk.Ir.ScalarCall call) =>
+        call.Args.Count > 1 && call.Args[1].KindCase == Chalk.Ir.Expr.KindOneofCase.Literal
+            ? call.Args[1].Literal.StringValue
+            : "a column";
+
+    public override Vector Evaluate(EvalContext context)
+    {
+        try
+        {
+            return _mask.Evaluate(context);
+        }
+        catch (Exception error) when (IsDataError(error))
+        {
+            throw Failed(_label);
+        }
+    }
+
+    /// <summary>What a mask's data error becomes: which mask failed, and nothing of the row.</summary>
+    internal static InvalidOperationException Failed(string label) =>
+        new($"The mask on {label} could not be computed for a row. Its own error is not reported, "
+            + "since it could quote the value the mask hides.");
+
+    /// <summary>An error a value causes, as against cancellation or one of the engine's own.</summary>
+    internal static bool IsDataError(Exception error) =>
+        error is InvalidOperationException or FormatException or ArithmeticException
+            or InvalidCastException or ArgumentException
+        && error is not OperationCanceledException and not Chalk.ChalkException;
+}
