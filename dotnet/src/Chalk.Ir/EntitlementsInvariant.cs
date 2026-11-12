@@ -785,9 +785,21 @@ internal static class EntitlementsInvariant
         /// 0058 §2). Reading them as origins is what labelled a sanitised column by the columns its
         /// own rule conditions consult. The conditions are not thereby unchecked: clause (b) holds
         /// them to what D203 permits in a predicate, which is where they now stand.
+        /// <para>
+        /// A sanitiser over a <c>BOOLEAN</c> column need not stay a <c>CASE</c>: the planner
+        /// simplifies <c>CASE WHEN v THEN FALSE ELSE NULL END</c> to <c>AND(NULL, IS NOT TRUE(v))</c>,
+        /// and where <c>v</c> is the verdict along a declared path it moves the expression onto the
+        /// mechanism's own correlation read. The condition is then a value's operand, and the
+        /// correlation column it tests would label the column <c>Redacted</c>, which the planner,
+        /// reading the same rules, rightly reports <c>PerRow</c>. So a correlation column read only
+        /// as an operand of a context membership test — the verdict, whether the principal holds
+        /// the row's marking along the path — is taken as the condition it is and not as an origin.
+        /// Only there: a correlation column in any other value is carried as before, and clause (c)
+        /// still refuses one at the root as itself.
+        /// </para>
         /// </remarks>
         private static void Derive(
-            HashSet<Origin> into, IReadOnlyList<HashSet<Origin>> input, Expr? expr)
+            HashSet<Origin> into, IReadOnlyList<HashSet<Origin>> input, Expr? expr, bool verdict = false)
         {
             if (expr is null)
             {
@@ -798,10 +810,10 @@ internal static class EntitlementsInvariant
             {
                 foreach (var clause in expr.IfThen.Clauses)
                 {
-                    Derive(into, input, clause.Result);
+                    Derive(into, input, clause.Result, verdict);
                 }
 
-                Derive(into, input, expr.IfThen.ElseBranch);
+                Derive(into, input, expr.IfThen.ElseBranch, verdict);
                 return;
             }
 
@@ -812,6 +824,11 @@ internal static class EntitlementsInvariant
                 {
                     foreach (var origin in input[index])
                     {
+                        if (verdict && origin.Correlation)
+                        {
+                            continue;
+                        }
+
                         into.Add(origin with { Derived = true });
                     }
                 }
@@ -819,9 +836,10 @@ internal static class EntitlementsInvariant
                 return;
             }
 
+            var membership = expr.KindCase == Expr.KindOneofCase.ContextMembership;
             foreach (var child in PlanWalker.Children(expr))
             {
-                Derive(into, input, child);
+                Derive(into, input, child, verdict || membership);
             }
         }
 
