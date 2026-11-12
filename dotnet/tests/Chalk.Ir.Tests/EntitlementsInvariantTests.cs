@@ -333,6 +333,80 @@ public sealed class EntitlementsInvariantTests
     }
 
     /// <summary>
+    /// The mechanism's own read along a declared path: the parent's columns, raw and disclosing
+    /// nothing, as a path's verdict reads them.
+    /// </summary>
+    private static Rel CorrelationRead() => new()
+    {
+        RowType = Members,
+        PolicyInjected = true,
+        Read = new Read
+        {
+            Table = new TableRef { SourceId = "mem", Schema = "main", Table = "members" },
+            Projection = { 0u, 1u, 2u, 3u, 4u },
+            Correlation = true,
+        },
+    };
+
+    private static Expr Holds(string list, Expr column) => new()
+    {
+        Type = Bool(),
+        ContextMembership = new ContextMembership { List = list, Columns = { column } },
+    };
+
+    /// <summary>
+    /// A sanitiser over a <c>BOOLEAN</c> column, simplified out of its <c>CASE</c>: <c>CASE WHEN v
+    /// THEN FALSE ELSE NULL END</c> is <c>AND(NULL, IS NOT TRUE(v))</c>, moved onto the path's
+    /// correlation read where <c>v</c> is the verdict along it. The correlation column the verdict
+    /// tests is the condition's and not the value's, so a report of <c>PerRow</c> stands.
+    /// </summary>
+    [Fact]
+    public void A_path_verdict_simplified_into_a_value_is_not_an_origin_of_it()
+    {
+        var plan = PlanOf(new Rel
+        {
+            RowType = Row(F("ready", Bool(true))),
+            Project = new Project
+            {
+                Input = CorrelationRead(),
+                Exprs =
+                {
+                    Call(
+                        FunctionId.And,
+                        Bool(true),
+                        Null(Bool(true)),
+                        Call(FunctionId.IsNotTrue, Bool(), Holds("org_reader", Ref(1, I64())))),
+                },
+            },
+        });
+
+        PlanValidator.Validate(plan, Catalog([DisclosureOutcome.PerRow]));
+    }
+
+    /// <summary>
+    /// Only as a verdict: the correlation column in any other value is still the mechanism's raw
+    /// read reaching the statement, carried as <c>Redacted</c>, and a report claiming more is refused.
+    /// </summary>
+    [Fact]
+    public void A_correlation_column_in_a_value_other_than_a_verdict_is_still_an_origin()
+    {
+        var plan = PlanOf(new Rel
+        {
+            RowType = Row(F("org_is_one", Bool())),
+            Project = new Project
+            {
+                Input = CorrelationRead(),
+                Exprs = { Call(FunctionId.Eq, Bool(), Ref(1, I64()), Lit(1L)) },
+            },
+        });
+
+        var error = Refused(plan, Catalog([DisclosureOutcome.PerRow]));
+
+        Assert.Equal("I-IR-E", error.Invariant);
+        Assert.Contains("say Redacted", error.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// And the arms still are: a condition that discloses nothing does not launder a result arm
     /// reading a column the report claims more of than the read allows.
     /// </summary>
