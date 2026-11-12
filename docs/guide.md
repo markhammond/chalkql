@@ -3716,6 +3716,20 @@ policy's decision for that row is *indeterminate* and ChalkQL settles it closed:
   result with a `PolicyIndeterminateException` (`PolicyIndeterminate`): it names the table and
   a correlation id, and not the reason, which could quote a value the policy hides.
 
+**At a source,** a database evaluates by its own rules, and ChalkQL cannot quarantine inside it.
+So a part of the policy that can raise, such as that cast, is not sent: the source returns the
+rows and ChalkQL evaluates it. What cannot raise in ChalkQL is sent, floating-point arithmetic
+included, and a database may raise on it all the same: PostgreSQL does on a floating-point
+division by zero, where ChalkQL answers infinity. Then, if the source has not yet returned a row,
+ChalkQL reads the table again with no filter and evaluates the policy itself, and the statement
+answers as it would in process. Your observer is told, with the source's error class (a SQLSTATE
+such as `22012`) and its message. A table marked `PushdownRequired` is never read without its row
+predicate, so there the result is withheld instead; and a row predicate with a part that can raise
+is refused on such a table when the statement is prepared. A source that fails after returning
+rows withholds the result too.
+
+**A maintained view** settles what its policy cannot decide at each update as a statement does.
+
 `.Leakproof()` is your promise that a function raises for no row and says nothing of one beyond
 its value. Nothing can check it, so Chalk relies on it, as PostgreSQL relies on `LEAKPROOF`; the
 quarantine is what holds should it be broken.
