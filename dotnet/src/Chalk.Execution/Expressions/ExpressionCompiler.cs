@@ -330,7 +330,9 @@ internal sealed class ExpressionCompiler
             Expr.KindOneofCase.Param => new ParameterExpr(BoundSlots.Of(expr.Param, _boundSlots), type),
             Expr.KindOneofCase.Call => expr.Call.UserFunction.Length > 0
                 ? UserCall(expr, type)
-                : expr.Call.Function == FunctionId.Coalesce && type.Kind == TypeKind.Composite
+                : expr.Call.Function is FunctionId.And or FunctionId.Or
+                    ? Kleene(expr, type)
+                    : expr.Call.Function == FunctionId.Coalesce && type.Kind == TypeKind.Composite
                     // D295: COALESCE over composites of one type, the first operand that holds one.
                     ? CompositeChoiceExpr.Coalesce(type, [.. expr.Call.Args.Select(Compile)])
                     : KernelRegistry.Bind(expr, Compile),
@@ -393,21 +395,57 @@ internal sealed class ExpressionCompiler
             descriptor.Volatility);
     }
 
+    /// <summary>
+    /// <c>AND</c> and <c>OR</c>: the first operand over the batch, each later one over the lanes the
+    /// operands before it left undecided, and so shared with nothing, as a <c>CASE</c> branch is.
+    /// </summary>
+    private IVectorExpr Kleene(Expr expr, ChalkType type)
+    {
+        var args = expr.Call.Args;
+        var operands = new IVectorExpr[args.Count];
+        if (operands.Length > 0)
+        {
+            operands[0] = Compile(args[0]);
+        }
+
+        _withinBranch++;
+        try
+        {
+            for (var i = 1; i < operands.Length; i++)
+            {
+                operands[i] = Compile(args[i]);
+            }
+        }
+        finally
+        {
+            _withinBranch--;
+        }
+
+        return new KleeneExpr(type, expr.Call.Function == FunctionId.And, operands);
+    }
+
     private IVectorExpr IfThen(Expr expr, ChalkType type)
     {
         var clauses = expr.IfThen.Clauses;
         var conditions = new IVectorExpr[clauses.Count];
         var results = new IVectorExpr[clauses.Count];
-        for (var i = 0; i < clauses.Count; i++)
+        if (clauses.Count > 0)
         {
-            conditions[i] = Compile(clauses[i].Condition);
+            conditions[0] = Compile(clauses[0].Condition);
         }
 
-        // The branches, each evaluated over its own lanes (F289), and so shared with nothing.
+        // The later conditions and the branches, each evaluated over its own lanes — a condition
+        // over the lanes no earlier one took, a branch over the lanes that chose it (F289) — and so
+        // shared with nothing.
         IVectorExpr elseBranch;
         _withinBranch++;
         try
         {
+            for (var i = 1; i < clauses.Count; i++)
+            {
+                conditions[i] = Compile(clauses[i].Condition);
+            }
+
             for (var i = 0; i < clauses.Count; i++)
             {
                 results[i] = Compile(clauses[i].Result);

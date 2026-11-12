@@ -622,6 +622,11 @@ public final class PushdownGate {
 
   /** Whether the IR function this call maps to is one the source declared. */
   private boolean function(RexCall call) {
+    // The client's wrapper of a mask (F300): the source is handed the mask itself, whose operands
+    // have been asked already, so it travels exactly when the mask does.
+    if (call.getOperator() == ChalkOperatorTable.MASKED) {
+      return true;
+    }
     chalk.planner.catalog.UserFunction declared =
         UserOperators.declarationOf(call.getOperator());
     if (declared != null) {

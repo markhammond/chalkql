@@ -216,6 +216,8 @@ class ReservedNamesTest {
                         .setName("ctx")
                         .setKind(FunctionKind.FUNCTION_KIND_SCALAR)
                         .setVolatility(Volatility.VOLATILITY_IMMUTABLE)
+                        // A mask calls it, and a mask may call only what cannot raise (F300).
+                        .setLeakproof(true)
                         .setReturnType(type(TypeKind.TYPE_KIND_STRING))
                         .addParameters(
                             Parameter.newBuilder()

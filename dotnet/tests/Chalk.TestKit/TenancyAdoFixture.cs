@@ -257,7 +257,8 @@ public sealed class TenancyAdoFixture : IDisposable
                 .Column("first_name", ChalkType.String(nullable: true))
                 .Sql("SELECT id, first_name FROM members WHERE org_id = org"))
             .AddFunction("echo", f => f.Scalar<string, string>("s").Strict().Client())
-            .AddFunction("echo_with_length", f => f.Scalar<string, TenancyFixture.Echoed>("s").Strict().Client())
+            // Leakproof, as a mask may call it (F300): it answers what it is handed and cannot raise.
+            .AddFunction("echo_with_length", f => f.Scalar<string, TenancyFixture.Echoed>("s").Strict().Leakproof().Client())
             .AddFunction("amount_summary", f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Client())
             .AddFunction(
                 "population_summary",
@@ -422,7 +423,8 @@ public sealed class TenancyAdoFixture : IDisposable
             // comes back — which is the case the residual rule exists for.
             .AddFunction("is_vip", f => f.Scalar<int, bool>("id").Strict().Client())
             .AddFunction("echo", f => f.Scalar<string, string>("s").Strict().Client())
-            .AddFunction("echo_with_length", f => f.Scalar<string, TenancyFixture.Echoed>("s").Strict().Client())
+            // Leakproof, as a mask may call it (F300): it answers what it is handed and cannot raise.
+            .AddFunction("echo_with_length", f => f.Scalar<string, TenancyFixture.Echoed>("s").Strict().Leakproof().Client())
             .AddFunction("amount_summary", f => f.Aggregate<long, TenancyFixture.AmountSummary>("x").Client())
             .AddFunction(
                 "population_summary",

@@ -3446,7 +3446,7 @@ public final class EntitlementPass {
                   + " discloses MASKED and states no mask, so there is nothing to put in the "
                   + "value's place.");
         }
-        yield mask;
+        yield masked(mask, table, columnName);
       }
       // Tainted on purpose. The trace of §3.4 has already refused every consumer that is not an
       // allow-listed population aggregate, so reaching here means the raw value may leave the leaf
@@ -3459,6 +3459,26 @@ public final class EntitlementPass {
       case DISCLOSURE_TEST -> placeholder(entitled, rule, columnType);
       default -> placeholder(entitled, rule, columnType);
     };
+  }
+
+  /**
+   * A mask that reads the row, wrapped so that an error raised computing it is reported without its
+   * own text (F300): the mask is evaluated in place of the value its rule hides, and an error there
+   * could quote it. Registration refuses a mask that can raise, so this holds only should that
+   * judgement miss. A mask that reads no column cannot fail per row, and is left as it is, which
+   * keeps a constant mask a constant for the rest of the planner.
+   */
+  private RexNode masked(RexNode mask, ChalkTable table, String columnName) {
+    if (!org.apache.calcite.rex.RexUtil.containsInputRef(mask)) {
+      return mask;
+    }
+    return rexBuilder.makeCall(
+        mask.getType(),
+        chalk.planner.plan.ChalkOperatorTable.MASKED,
+        List.of(
+            mask,
+            rexBuilder.makeLiteral(
+                table.schemaName() + "." + table.tableName() + "." + columnName)));
   }
 
   /**

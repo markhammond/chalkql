@@ -93,6 +93,9 @@ internal static class KernelRegistry
                 new FingerprintExpr(result, compile(call.Args[0]), compile(call.Args[1])),
             FunctionId.Present => new PresentExpr(result, compile(call.Args[0])),
 
+            // The planner's wrapper of a mask (F300): the mask, its errors reported without their text.
+            FunctionId.Masked => new MaskedExpr(result, compile(call.Args[0]), MaskedExpr.LabelOf(call)),
+
             _ => throw Unsupported(call.Function, call.Args),
         };
     }

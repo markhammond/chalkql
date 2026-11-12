@@ -98,8 +98,8 @@ internal sealed class NullIfExpr : VectorExprBase
 }
 
 /// <summary>
-/// <c>CASE WHEN … THEN … ELSE … END</c>. The conditions are evaluated in order over every lane, and
-/// each branch then over the lanes that take it and no other (F289): a lane is a branch's when its
+/// <c>CASE WHEN … THEN … ELSE … END</c>. The conditions are evaluated in order, each over the lanes no
+/// earlier one took, and each branch then over the lanes that take it and no other (F289): a lane is a branch's when its
 /// condition is the first to hold, and the <c>ELSE</c>'s when none does. So a branch raises for no
 /// row whose condition is false, as SQL means, and <c>CASE WHEN x &lt;&gt; 0 THEN y / x END</c>
 /// guards the division. A branch every lane takes is evaluated as the batch is, with no narrowing.
@@ -114,6 +114,8 @@ internal sealed class IfThenExpr : VectorExprBase
 
     /// <summary>The lanes of the branch being evaluated, a bit per row; grown, never shrunk.</summary>
     private byte[] _lanes = [];
+
+    private readonly LaneScope _undecided = new();
 
     public IfThenExpr(
         ChalkType type, IVectorExpr[] conditions, IVectorExpr[] results, IVectorExpr elseBranch)
@@ -131,10 +133,13 @@ internal sealed class IfThenExpr : VectorExprBase
         var choice = CoalesceExpr.Choices(ref _choice, length);
         choice.Fill(_results.Length);
 
-        // Conditions first, so a lane that has already matched is left alone by later clauses.
+        // Conditions first, so a lane that has already matched is left alone by later clauses: each
+        // condition after the first is evaluated over the lanes no earlier one took.
         for (var k = 0; k < _conditions.Length; k++)
         {
-            var condition = _conditions[k].Evaluate(context);
+            var condition = k == 0
+                ? _conditions[k].Evaluate(context)
+                : _undecided.Evaluate(context, _conditions[k], choice, _results.Length);
             var lanes = Lanes<byte>.From(condition);
             for (var i = 0; i < length; i++)
             {

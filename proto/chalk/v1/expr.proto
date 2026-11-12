@@ -328,6 +328,12 @@ enum FunctionId {
   // written, and the escape rules are LIKE's. Evaluated by the client only: no source's ILIKE folds
   // exactly so, and no index answers it.
   FUNCTION_ID_ILIKE = 83;
+  // (value, STRING label) -> the value's type: the value itself. An error raised evaluating it is
+  // reported as the mask on the column the label names having failed for a row, without the error's
+  // own text, which could quote the very value the mask hides (F300). The planner wraps a mask that
+  // reads a column in it, the label a literal `schema.table.column`; a statement cannot write it. It
+  // is not a source function in any dialect, so it never pushes.
+  FUNCTION_ID_MASKED = 84;
 }
 
 // Aggregate functions. Argument and result types are on the Measure.
