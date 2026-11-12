@@ -8,14 +8,17 @@ namespace Chalk.Execution.Expressions;
 /// <summary>
 /// Kleene <c>AND</c> and <c>OR</c> (<c>02-ir.md</c> §5), n-ary. Each operand moves the lane towards its
 /// absorbing value — FALSE for AND, TRUE for OR — and a lane that never reaches it but saw a NULL is
-/// NULL. Once every lane has been absorbed the remaining operands are not evaluated at all, which is
-/// the lane-mask short circuit §6.4 asks for.
+/// NULL. Each operand after the first is evaluated over the lanes the ones before it left undecided,
+/// and once every lane has been absorbed the rest are not evaluated at all: the lane-mask short
+/// circuit §6.4 asks for. So <c>x &lt;&gt; 0 AND y / x &gt; 1</c> divides by no zero, and a rule's
+/// condition after the test of its role is evaluated only for the rows whose principal holds it.
 /// </summary>
 internal sealed class KleeneExpr : VectorExprBase
 {
     private readonly IVectorExpr[] _operands;
     private readonly bool _isAnd;
     private byte[] _sawNull = [];
+    private readonly LaneScope _undecided = new();
 
     public KleeneExpr(ChalkType type, bool isAnd, IVectorExpr[] operands)
         : base(type)
@@ -39,9 +42,11 @@ internal sealed class KleeneExpr : VectorExprBase
         sawNull.Clear();
 
         var absorbed = 0;
-        foreach (var operand in _operands)
+        for (var k = 0; k < _operands.Length; k++)
         {
-            var vector = operand.Evaluate(context);
+            var vector = k == 0
+                ? _operands[k].Evaluate(context)
+                : _undecided.Evaluate(context, _operands[k], result, absorbing);
             var lanes = Lanes<byte>.From(vector);
             for (var i = 0; i < length; i++)
             {
@@ -87,6 +92,96 @@ internal sealed class KleeneExpr : VectorExprBase
         }
 
         return Scratch.Finish(length, nulls);
+    }
+}
+
+/// <summary>
+/// An operand evaluated over the selected lanes still undecided — those whose answer so far is not
+/// <c>decided</c> — narrowed as a <c>CASE</c> branch is (F289), or over the batch as it is when every
+/// selected lane is undecided. The lanes are owned here, a bit per row, grown and never shrunk.
+/// </summary>
+internal sealed class LaneScope
+{
+    private byte[] _lanes = [];
+
+    public Vector Evaluate(EvalContext context, IVectorExpr operand, ReadOnlySpan<byte> answers, byte decided)
+    {
+        var lanes = Begin(context.Length);
+        var selection = context.SelectionMask;
+        var open = 0;
+        var selected = 0;
+        for (var i = 0; i < context.Length; i++)
+        {
+            if (!selection.IsEmpty && !BitUtility.GetBit(selection, i))
+            {
+                continue;
+            }
+
+            selected++;
+            if (answers[i] != decided)
+            {
+                BitUtility.SetBit(lanes, i);
+                open++;
+            }
+        }
+
+        return Within(context, operand, open == selected);
+    }
+
+    /// <summary>The same, the undecided lanes being those whose choice is still <paramref name="none"/>.</summary>
+    public Vector Evaluate(EvalContext context, IVectorExpr operand, ReadOnlySpan<int> choice, int none)
+    {
+        var lanes = Begin(context.Length);
+        var selection = context.SelectionMask;
+        var open = 0;
+        var selected = 0;
+        for (var i = 0; i < context.Length; i++)
+        {
+            if (!selection.IsEmpty && !BitUtility.GetBit(selection, i))
+            {
+                continue;
+            }
+
+            selected++;
+            if (choice[i] == none)
+            {
+                BitUtility.SetBit(lanes, i);
+                open++;
+            }
+        }
+
+        return Within(context, operand, open == selected);
+    }
+
+    private Span<byte> Begin(int length)
+    {
+        var bytes = Validity.ByteCount(length);
+        if (_lanes.Length < Math.Max(bytes, 1))
+        {
+            _lanes = new byte[Math.Max(bytes, 1)];
+        }
+
+        var lanes = _lanes.AsSpan(0, bytes);
+        lanes.Clear();
+        return lanes;
+    }
+
+    private Vector Within(EvalContext context, IVectorExpr operand, bool everyLane)
+    {
+        if (everyLane)
+        {
+            return operand.Evaluate(context);
+        }
+
+        var scope = context.Narrow(_lanes);
+        try
+        {
+            return operand.Evaluate(context);
+        }
+        finally
+        {
+            context.Restore(scope);
+        }
     }
 }
 
