@@ -95,6 +95,8 @@ class EntitlementPushdownTest {
     assertThat(physical.lines().findFirst().orElseThrow()).doesNotContain("ChalkEntitlementBarrier");
     assertThat(physical.lines().filter(line -> line.contains("ChalkEntitlementBarrier")).count())
         .isEqualTo(2);
+  }
+
   // ------------------------------------------------------------------ quarantine (design 82 §6)
 
   /**
