@@ -231,6 +231,29 @@ public sealed class QuarantineTests(SharedSidecar sidecar)
         ],
     };
 
+    /// <summary>
+    /// The statement's own condition is the statement's, in a sub-query as at the top: one that divides
+    /// by zero on R3, a row the user is shown, fails the statement both ways, and is not settled as the
+    /// policy's. Settled, the sub-query's count would have been one short, with nothing said.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Engines))]
+    public async Task A_statements_own_condition_fails_in_a_sub_query_as_at_the_top(ExecutionEngine executor)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        const string Divides = "1 / (CASE WHEN x.Note = 'third' THEN 0 ELSE 1 END) = 1";
+        await using var fixture = await Fixture.CreateAsync(
+            sidecar, new TableEntitlementDescriptor { RowPredicate = "ReportId <> 'R2'" }, executor);
+
+        var top = await Assert.ThrowsAnyAsync<ChalkException>(
+            () => fixture.RowsAsync($"SELECT x.ReportId FROM s.reports AS x WHERE {Divides}"));
+        var nested = await Assert.ThrowsAnyAsync<ChalkException>(
+            () => fixture.RowsAsync($"SELECT ReportId FROM s.reports WHERE 2 = (SELECT COUNT(*) FROM s.reports AS x WHERE {Divides})"));
+
+        Assert.IsNotType<PolicyIndeterminateException>(top);
+        Assert.IsNotType<PolicyIndeterminateException>(nested);
+    }
+
     private sealed class Decisions : IIndeterminateDecisions
     {
         public List<IndeterminateDecision> Seen { get; } = [];

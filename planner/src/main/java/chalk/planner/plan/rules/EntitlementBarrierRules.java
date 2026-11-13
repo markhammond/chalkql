@@ -240,12 +240,76 @@ public final class EntitlementBarrierRules {
       if (!join.getVariablesSet().isEmpty() || !crosses(join.getCondition())) {
         return;
       }
+      // The fence is the root of the policy's quarantine (F302), so what goes below it is settled as
+      // the policy's own work: a row its filter raises for is left out without a word. The other
+      // side goes only where it cannot raise, so a statement's own sub-query keeps its errors.
+      if (!fencedOrCannotRaise(call.rel(1)) || !fencedOrCannotRaise(call.rel(2))) {
+        return;
+      }
       RelNode left = unfenced(call.rel(1));
       RelNode right = unfenced(call.rel(2));
       RelNode moved =
           join.copy(
               join.getTraitSet(), join.getCondition(), left, right, join.getJoinType(), join.isSemiJoinDone());
       call.transformTo(EntitlementBarrier.over(moved));
+    }
+
+    /**
+     * Whether {@code input} is a fence, or a tree nothing in which can raise for a row: every
+     * expression leakproof and every aggregate a count or an extreme. A fence deeper down is its own
+     * quarantine, and what is under it is its policy's.
+     */
+    private static boolean fencedOrCannotRaise(RelNode input) {
+      RelNode node = resolved(input);
+      if (node instanceof EntitlementBarrier) {
+        return true;
+      }
+      if (node instanceof org.apache.calcite.rel.core.Aggregate aggregate) {
+        for (org.apache.calcite.rel.core.AggregateCall measure : aggregate.getAggCallList()) {
+          switch (measure.getAggregation().getKind()) {
+            case COUNT, MIN, MAX, ANY_VALUE -> {}
+            default -> {
+              return false;
+            }
+          }
+        }
+      } else if (!(node instanceof org.apache.calcite.rel.core.TableScan
+          || node instanceof org.apache.calcite.rel.core.Filter
+          || node instanceof org.apache.calcite.rel.core.Project
+          || node instanceof org.apache.calcite.rel.core.Join
+          || node instanceof org.apache.calcite.rel.core.Sort
+          || node instanceof org.apache.calcite.rel.core.Values)) {
+        return false;
+      }
+      boolean[] raises = {false};
+      node.accept(
+          new org.apache.calcite.rex.RexShuttle() {
+            @Override
+            public RexNode visitCall(org.apache.calcite.rex.RexCall call) {
+              raises[0] |= !Leakproof.is(call);
+              return call;
+            }
+          });
+      if (raises[0]) {
+        return false;
+      }
+      for (RelNode child : node.getInputs()) {
+        if (!fencedOrCannotRaise(child)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    private static RelNode resolved(RelNode rel) {
+      if (rel instanceof org.apache.calcite.plan.hep.HepRelVertex vertex) {
+        return vertex.getCurrentRel();
+      }
+      if (rel instanceof org.apache.calcite.plan.volcano.RelSubset subset) {
+        RelNode best = subset.getBest();
+        return best != null ? best : subset.getOriginal();
+      }
+      return rel;
     }
 
     private static RelNode unfenced(RelNode input) {

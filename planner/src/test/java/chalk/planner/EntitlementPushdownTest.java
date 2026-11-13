@@ -75,6 +75,28 @@ class EntitlementPushdownTest {
     assertThat(result.pushedRowPredicates()).containsExactly("remote.members");
   }
 
+  // ------------------------------------------------------------------ the fence and a join (F302)
+
+  /**
+   * A join goes below an entitled table's fence only where its other side cannot raise, since what
+   * is below the fence is the policy's quarantine and a row it raises for is left out silently. A
+   * statement's own sub-query that divides stays above, so its error is the statement's.
+   */
+  @Test
+  void a_join_whose_other_side_can_raise_stays_above_the_fence() throws Exception {
+    String physical =
+        plan(
+                TenancyCatalogs.catalog(),
+                "SELECT id FROM main.members WHERE 2 = (SELECT COUNT(*) FROM main.members x"
+                    + " WHERE 1 / (CASE WHEN CHAR_LENGTH(x.postcode) = 4 THEN 0 ELSE 1 END) = 1)",
+                TenancyCatalogs.manager(1, 2))
+            .physicalPlanText();
+
+    assertThat(physical.lines().findFirst().orElseThrow()).doesNotContain("ChalkEntitlementBarrier");
+    assertThat(physical.lines().filter(line -> line.contains("ChalkEntitlementBarrier")).count())
+        .isEqualTo(2);
+  }
+
   // ------------------------------------------------------------------ locality (§3.8, D200)
 
   /**
