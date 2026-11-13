@@ -241,9 +241,9 @@ public final class EntitlementBarrierRules {
         return;
       }
       // The fence is the root of the policy's quarantine (F302), so what goes below it is settled as
-      // the policy's own work: a row its filter raises for is left out without a word. The other
-      // side goes only where it cannot raise, so a statement's own sub-query keeps its errors.
-      if (!fencedOrCannotRaise(call.rel(1)) || !fencedOrCannotRaise(call.rel(2))) {
+      // the policy's own work: a row its filter raises for is left out without a word. A join goes
+      // only where neither side can raise, so a statement's own sub-query keeps its errors.
+      if (!cannotRaise(call.rel(1)) || !cannotRaise(call.rel(2))) {
         return;
       }
       RelNode left = unfenced(call.rel(1));
@@ -255,14 +255,14 @@ public final class EntitlementBarrierRules {
     }
 
     /**
-     * Whether {@code input} is a fence, or a tree nothing in which can raise for a row: every
-     * expression leakproof and every aggregate a count or an extreme. A fence deeper down is its own
-     * quarantine, and what is under it is its policy's.
+     * Whether nothing in {@code input} can raise for a row: every expression leakproof and every
+     * aggregate a count or an extreme. A fence is looked through, not trusted: the statement's own
+     * aggregate may have gone below it, and the join would put that inside the merged fence too.
      */
-    private static boolean fencedOrCannotRaise(RelNode input) {
+    private static boolean cannotRaise(RelNode input) {
       RelNode node = resolved(input);
-      if (node instanceof EntitlementBarrier) {
-        return true;
+      if (node instanceof EntitlementBarrier barrier) {
+        return cannotRaise(barrier.getInput());
       }
       if (node instanceof org.apache.calcite.rel.core.Aggregate aggregate) {
         for (org.apache.calcite.rel.core.AggregateCall measure : aggregate.getAggCallList()) {
@@ -294,7 +294,7 @@ public final class EntitlementBarrierRules {
         return false;
       }
       for (RelNode child : node.getInputs()) {
-        if (!fencedOrCannotRaise(child)) {
+        if (!cannotRaise(child)) {
           return false;
         }
       }

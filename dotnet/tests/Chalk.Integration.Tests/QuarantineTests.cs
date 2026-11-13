@@ -254,6 +254,28 @@ public sealed class QuarantineTests(SharedSidecar sidecar)
         Assert.IsNotType<PolicyIndeterminateException>(nested);
     }
 
+    /// <summary>
+    /// The statement's own aggregate is the statement's: a sum that overflows over the rows the user
+    /// is shown fails with its own error, at the top and in a sub-query, and is not reported as a
+    /// decision the policy could not reach.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Engines))]
+    public async Task A_statements_sum_that_overflows_fails_as_its_own(ExecutionEngine executor)
+    {
+        Assert.SkipWhen(!sidecar.Sidecar.IsAvailable, sidecar.SkipReason ?? string.Empty);
+        const string Sum = "SELECT SUM(CAST(9223372036854775807 AS BIGINT)) FROM s.reports";
+        await using var fixture = await Fixture.CreateAsync(
+            sidecar, new TableEntitlementDescriptor { RowPredicate = "ReportId <> 'R2'" }, executor);
+
+        var top = await Assert.ThrowsAnyAsync<ChalkException>(() => fixture.RowsAsync(Sum));
+        var nested = await Assert.ThrowsAnyAsync<ChalkException>(
+            () => fixture.RowsAsync($"SELECT ReportId FROM s.reports WHERE 0 < ({Sum})"));
+
+        Assert.IsNotType<PolicyIndeterminateException>(top);
+        Assert.IsNotType<PolicyIndeterminateException>(nested);
+    }
+
     private sealed class Decisions : IIndeterminateDecisions
     {
         public List<IndeterminateDecision> Seen { get; } = [];

@@ -97,6 +97,31 @@ class EntitlementPushdownTest {
         .isEqualTo(2);
   }
 
+  /**
+   * The statement's aggregate, moved below the fence, stands outside the quarantine: it begins at
+   * the policy's own work beneath, so a sum that overflows is the statement's error.
+   */
+  @Test
+  void the_quarantine_begins_beneath_the_statements_aggregate() throws Exception {
+    Rel root =
+        irOf(plan(TenancyCatalogs.catalog(), "SELECT SUM(id) FROM main.members", TenancyCatalogs.manager(1, 2)))
+            .getRoot();
+    Rel aggregate = root;
+    while (aggregate.hasProject()) {
+      aggregate = aggregate.getProject().getInput();
+    }
+
+    assertThat(aggregate.getKindCase().name()).contains("AGGREGATE");
+    assertThat(aggregate.getQuarantine()).isEmpty();
+    Rel below =
+        switch (aggregate.getKindCase()) {
+          case HASH_AGGREGATE -> aggregate.getHashAggregate().getAggregate().getInput();
+          case STREAM_AGGREGATE -> aggregate.getStreamAggregate().getAggregate().getInput();
+          default -> aggregate.getAggregate().getInput();
+        };
+    assertThat(below.getQuarantine()).isEqualTo("main.members");
+  }
+
   // ------------------------------------------------------------------ locality (§3.8, D200)
 
   /**
