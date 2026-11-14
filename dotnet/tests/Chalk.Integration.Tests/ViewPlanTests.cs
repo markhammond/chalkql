@@ -69,6 +69,12 @@ public sealed class ViewPlanTests(SharedSidecar sidecar) : IDisposable
         await desk.Engine.RefreshAsync(r => r.DeferPlanning(), Ct);
         await view.UpdateAsync(Ct);
 
+        // That refresh starts a run of its own, which asks the host too. Let it finish while the host
+        // still says no: a run that asked only after the host said yes would plan the statement
+        // itself, and leave the next run nothing to do.
+        await desk.Engine.BackgroundPlanningSettledAsync();
+        Assert.Equal(Counts(drifted: 1, vetoed: 1), desk.Engine.LastBackgroundPlans);
+
         Assert.Equal(planned, view.Statement.PlanDigest);
         Assert.Equal(0, watch.Replans);
         var asked = host.Asked;
