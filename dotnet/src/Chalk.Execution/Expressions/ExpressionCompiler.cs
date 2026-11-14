@@ -70,6 +70,12 @@ internal sealed class ExpressionCompiler
         _tally = tally;
     }
 
+    /// <summary>
+    /// The entitled tables of the quarantine this compiler's operator stands in (F302, design 82), or
+    /// empty outside one: what a guard records its settled rows under.
+    /// </summary>
+    internal string Quarantine { get; init; } = "";
+
     /// <summary>Distinct nodes this compiler has handed to more than one occurrence (D299).</summary>
     public int SharedNodes { get; private set; }
 
@@ -332,6 +338,8 @@ internal sealed class ExpressionCompiler
                 ? UserCall(expr, type)
                 : expr.Call.Function is FunctionId.And or FunctionId.Or
                     ? Kleene(expr, type)
+                    : expr.Call.Function == FunctionId.Guarded
+                    ? Guarded(expr, type)
                     : expr.Call.Function == FunctionId.Coalesce && type.Kind == TypeKind.Composite
                     // D295: COALESCE over composites of one type, the first operand that holds one.
                     ? CompositeChoiceExpr.Coalesce(type, [.. expr.Call.Args.Select(Compile)])
@@ -422,6 +430,23 @@ internal sealed class ExpressionCompiler
         }
 
         return new KleeneExpr(type, expr.Call.Function == FunctionId.And, operands);
+    }
+
+    /// <summary>
+    /// A rule's guarded condition (F302): compiled as a branch, since on an error it is evaluated over
+    /// each row alone, narrowed, and so shared with nothing.
+    /// </summary>
+    private IVectorExpr Guarded(Expr expr, ChalkType type)
+    {
+        _withinBranch++;
+        try
+        {
+            return new GuardedExpr(type, Compile(expr.Call.Args[0]), Quarantine.Length > 0 ? Quarantine : "the policy's tables");
+        }
+        finally
+        {
+            _withinBranch--;
+        }
     }
 
     private IVectorExpr IfThen(Expr expr, ChalkType type)

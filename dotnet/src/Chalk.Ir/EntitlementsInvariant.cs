@@ -151,7 +151,8 @@ internal static class EntitlementsInvariant
         state.Reads(plan.Root, "root");
         foreach (var shared in plan.Shared)
         {
-            state.Reads(shared.Rel, $"shared#{shared.Id}");
+            // A shared body stands where its uses stand: inside a quarantine if one was (F302).
+            state.Reads(shared.Rel, $"shared#{shared.Id}", state.QuarantinedShared.Contains(shared.Id));
         }
 
         if (!state.AnyEntitled)
@@ -181,7 +182,10 @@ internal static class EntitlementsInvariant
         /// the top-level plan and inside every pushed plan — carries the pass's mark and exactly one
         /// verdict per column of the table.
         /// </summary>
-        internal void Reads(Rel? rel, string path)
+        /// <summary>The shared subtrees a use inside a quarantine refers to (F302).</summary>
+        internal HashSet<uint> QuarantinedShared { get; } = [];
+
+        internal void Reads(Rel? rel, string path, bool quarantined = false)
         {
             if (rel is null)
             {
@@ -189,10 +193,29 @@ internal static class EntitlementsInvariant
             }
 
             var here = $"{path}/{rel.KindCase}";
+            quarantined |= rel.Quarantine.Length > 0;
+            if (rel.KindCase == Rel.KindOneofCase.SharedRef && quarantined)
+            {
+                QuarantinedShared.Add(rel.SharedRef.Id);
+            }
+
             if (rel.KindCase == Rel.KindOneofCase.Read)
             {
                 var read = rel.Read;
                 var columns = options.EntitledTables!(read.Table);
+                if (columns is not null && !quarantined)
+                {
+                    // Every entitled read, the mechanism's own correlations among them, stands in the
+                    // quarantine of the barrier that fenced it (F302, design 82): outside one, an error
+                    // its policy raised would reach the host as itself.
+                    throw new InvalidPlanException(
+                        ChalkErrorCodes.PlanBreaksEntitlements,
+                        Invariant,
+                        here,
+                        $"the read of {Name(read.Table)} carries an entitlement and stands in no "
+                        + "quarantine, so the plan does not mark the subtree its barrier stood over");
+                }
+
                 if (columns is null)
                 {
                     if (read.Disclosures.Count > 0)
@@ -298,12 +321,12 @@ internal static class EntitlementsInvariant
 
             foreach (var pushed in PlanWalker.Pushed(rel))
             {
-                Reads(pushed, here + "/pushed");
+                Reads(pushed, here + "/pushed", quarantined);
             }
 
             foreach (var input in PlanWalker.Inputs(rel))
             {
-                Reads(input, here);
+                Reads(input, here, quarantined);
             }
         }
 

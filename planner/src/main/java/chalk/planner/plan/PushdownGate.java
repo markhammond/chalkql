@@ -573,6 +573,13 @@ public final class PushdownGate {
     if (!(node instanceof RexCall call)) {
       return false;
     }
+    // A rule condition's guard (F302) is marked dynamic only so that nothing evaluates it while
+    // planning; what it answers depends on its row alone. A source is handed the condition itself, and
+    // only one that cannot raise; the quarantine's fallback holds should it raise all the same.
+    if (call.getOperator() == ChalkOperatorTable.GUARDED) {
+      RexNode condition = call.getOperands().get(0);
+      return pushable(condition) && chalk.planner.entitlement.Leakproof.is(condition);
+    }
     if (!isDeterministic(call)) {
       return false;
     }
@@ -622,10 +629,11 @@ public final class PushdownGate {
 
   /** Whether the IR function this call maps to is one the source declared. */
   private boolean function(RexCall call) {
-    // The client's wrapper of a mask (F300): the source is handed the mask itself, whose operands
-    // have been asked already, so it travels exactly when the mask does.
-    if (call.getOperator() == ChalkOperatorTable.MASKED) {
-      return true;
+    // A rule condition's guard (F302): no source has it, so a source is handed the condition itself,
+    // and only where nothing in it can raise; its operands have been asked already. Should the source
+    // raise all the same, the quarantine's fallback is what holds.
+    if (call.getOperator() == ChalkOperatorTable.GUARDED) {
+      return chalk.planner.entitlement.Leakproof.is(call.getOperands().get(0));
     }
     chalk.planner.catalog.UserFunction declared =
         UserOperators.declarationOf(call.getOperator());

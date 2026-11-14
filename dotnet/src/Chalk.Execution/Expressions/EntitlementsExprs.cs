@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Apache.Arrow;
 using Chalk.Catalog;
 using Chalk.Execution.Vectors;
 
@@ -158,51 +159,125 @@ internal sealed class PresentExpr : VectorExprBase
 }
 
 /// <summary>
-/// <c>$chalk$masked(mask, label)</c> (F300): the mask's own value, and an error raised computing it
-/// reported as the mask on the labelled column having failed, without the error's text. The mask is
-/// evaluated in place of the value its rule hides, so an error from a cast or a function inside it
-/// could quote that value. Registration refuses a mask that can raise; this holds should that
-/// judgement miss. Only a data error is redacted — cancellation and the engine's own refusals pass
-/// through as they are.
+/// <c>$chalk$guarded(condition)</c> (F302, design 82): a rule's condition in the sanitising projection,
+/// answered over the batch, and, should evaluating it raise, again over each row alone, NULL for a row
+/// where it raises. A rule whose condition has no answer is not applied: the row falls to the next rule,
+/// exactly as when the condition is false. Each row it settles so is recorded as the policy's
+/// indeterminate decision, a <c>RuleNotApplied</c>, under the quarantine's tables.
 /// </summary>
-internal sealed class MaskedExpr : VectorExprBase
+internal sealed class GuardedExpr : VectorExprBase
 {
-    private readonly IVectorExpr _mask;
-    private readonly string _label;
+    private readonly IVectorExpr _condition;
+    private readonly string _tables;
+    private byte[] _lane = [];
+    private byte[] _answers = [];
+    private byte[] _known = [];
 
-    public MaskedExpr(ChalkType type, IVectorExpr mask, string label)
+    public GuardedExpr(ChalkType type, IVectorExpr condition, string tables)
         : base(type)
     {
-        _mask = mask;
-        _label = label;
+        _condition = condition;
+        _tables = tables;
     }
-
-    /// <summary>The column the planner named in the wrapper's second argument, a literal.</summary>
-    internal static string LabelOf(Chalk.Ir.ScalarCall call) =>
-        call.Args.Count > 1 && call.Args[1].KindCase == Chalk.Ir.Expr.KindOneofCase.Literal
-            ? call.Args[1].Literal.StringValue
-            : "a column";
 
     public override Vector Evaluate(EvalContext context)
     {
         try
         {
-            return _mask.Evaluate(context);
+            return _condition.Evaluate(context);
         }
-        catch (Exception error) when (IsDataError(error))
+        catch (Exception error) when (Chalk.Sources.IndeterminateLedger.IsDataError(error))
         {
-            throw Failed(_label);
+            return RowByRow(context, error);
         }
     }
 
-    /// <summary>What a mask's data error becomes: which mask failed, and nothing of the row.</summary>
-    internal static InvalidOperationException Failed(string label) =>
-        new($"The mask on {label} could not be computed for a row. Its own error is not reported, "
-            + "since it could quote the value the mask hides.");
+    /// <summary>The condition over each selected row alone, NULL where it raises.</summary>
+    private Vector RowByRow(EvalContext context, Exception first)
+    {
+        var length = context.Length;
+        var selection = context.SelectionMask;
+        var bytes = Validity.ByteCount(length);
+        if (_lane.Length < Math.Max(bytes, 1))
+        {
+            _lane = new byte[Math.Max(bytes, 1)];
+        }
 
-    /// <summary>An error a value causes, as against cancellation or one of the engine's own.</summary>
-    internal static bool IsDataError(Exception error) =>
-        error is InvalidOperationException or FormatException or ArithmeticException
-            or InvalidCastException or ArgumentException
-        && error is not OperationCanceledException and not Chalk.ChalkException;
+        if (_answers.Length < length)
+        {
+            _answers = new byte[length];
+            _known = new byte[length];
+        }
+
+        long settled = 0;
+        for (var i = 0; i < length; i++)
+        {
+            _answers[i] = 0;
+            _known[i] = 0;
+            if (!selection.IsEmpty && !BitUtility.GetBit(selection, i))
+            {
+                continue;
+            }
+
+            System.Array.Clear(_lane, 0, bytes);
+            BitUtility.SetBit(_lane, i);
+            var scope = context.Narrow(_lane);
+            try
+            {
+                var answer = _condition.Evaluate(context);
+                if (answer.IsScalar)
+                {
+                    _known[i] = (byte)(answer.Scalar.IsNull ? 0 : 1);
+                    _answers[i] = (byte)(!answer.Scalar.IsNull && answer.Scalar.Integer != 0 ? 1 : 0);
+                }
+                else
+                {
+                    var lanes = Lanes<byte>.From(answer);
+                    _known[i] = (byte)(lanes.IsValid(i) ? 1 : 0);
+                    _answers[i] = (byte)(lanes.IsValid(i) && lanes[i] != 0 ? 1 : 0);
+                }
+            }
+            catch (Exception error) when (Chalk.Sources.IndeterminateLedger.IsDataError(error))
+            {
+                settled++;
+            }
+            finally
+            {
+                context.Restore(scope);
+            }
+        }
+
+        if (settled > 0)
+        {
+            context.Arena.Indeterminate?.Record(
+                _tables, Chalk.Sources.IndeterminateResolution.RuleNotApplied, settled, first);
+        }
+
+        var result = Scratch.Values<byte>(length);
+        var nulls = 0;
+        for (var i = 0; i < length; i++)
+        {
+            result[i] = _answers[i];
+        }
+
+        var bits = Scratch.BeginValidity(length);
+        for (var i = 0; i < length; i++)
+        {
+            if (_known[i] != 0)
+            {
+                BitUtility.SetBit(bits, i);
+            }
+            else
+            {
+                nulls++;
+            }
+        }
+
+        if (nulls == 0)
+        {
+            Scratch.NoValidity();
+        }
+
+        return Scratch.Finish(length, nulls);
+    }
 }

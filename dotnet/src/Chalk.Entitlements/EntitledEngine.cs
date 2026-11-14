@@ -21,11 +21,18 @@ public static class ChalkEngineEntitlements
     /// A host's observer of entitled executions (D157, D205). Null — the default — raises nothing
     /// and builds nothing: no audit event unless subscribed (§0).
     /// </param>
+    /// <param name="indeterminate">
+    /// A host's observer of the policy's indeterminate decisions, handed each with its reason (F302,
+    /// design 82). Null — the default — builds no reason and keeps nothing.
+    /// </param>
     public static EntitledEngine WithEntitlements(
-        this ChalkEngine engine, EntitlementsOptions? options = null, IEntitlementsAudit? audit = null)
+        this ChalkEngine engine,
+        EntitlementsOptions? options = null,
+        IEntitlementsAudit? audit = null,
+        IIndeterminateDecisions? indeterminate = null)
     {
         ArgumentNullException.ThrowIfNull(engine);
-        return new EntitledEngine(engine, options ?? new EntitlementsOptions(), audit);
+        return new EntitledEngine(engine, options ?? new EntitlementsOptions(), audit, indeterminate);
     }
 }
 
@@ -43,12 +50,47 @@ public static class ChalkEngineEntitlements
 public sealed class EntitledEngine
 {
     private readonly IEntitlementsAudit? _audit;
+    private readonly IIndeterminateDecisions? _indeterminate;
+    private long _observerFaults;
+    private Type? _lastObserverFault;
 
-    internal EntitledEngine(ChalkEngine engine, EntitlementsOptions options, IEntitlementsAudit? audit)
+    internal EntitledEngine(
+        ChalkEngine engine,
+        EntitlementsOptions options,
+        IEntitlementsAudit? audit,
+        IIndeterminateDecisions? indeterminate = null)
     {
         Engine = engine;
         Options = options;
         _audit = audit;
+        _indeterminate = indeterminate;
+    }
+
+    /// <summary>
+    /// How many times the observer of indeterminate decisions threw (F302, design 82). Its exceptions do
+    /// not propagate, since a broken logger must not fail a statement that would have answered, and are
+    /// never surfaced, since one could quote the reason it was handed; they are counted here.
+    /// </summary>
+    public long IndeterminateObserverFaults => Interlocked.Read(ref _observerFaults);
+
+    /// <summary>The type of the last exception the observer threw, never its message; null if none.</summary>
+    public Type? LastIndeterminateObserverFault => Volatile.Read(ref _lastObserverFault);
+
+    /// <summary>What a query through this engine hands its execution's indeterminate decisions to; null where nothing listens.</summary>
+    internal IIndeterminateDecisions? Indeterminate => _indeterminate;
+
+    /// <summary>Hands one decision to the observer, counting what it throws rather than letting it through.</summary>
+    internal void Resolved(IndeterminateDecision decision)
+    {
+        try
+        {
+            _indeterminate?.Resolved(decision);
+        }
+        catch (Exception fault)
+        {
+            Interlocked.Increment(ref _observerFaults);
+            Volatile.Write(ref _lastObserverFault, fault.GetType());
+        }
     }
 
     /// <summary>The engine underneath. Execution, catalog refresh and everything else go through it.</summary>
@@ -161,7 +203,8 @@ public sealed class EntitledQuery
             schema => Disclosures.Decorate(schema, Entitlements.Columns),
             audit is null || Entitlements.Tables.Count == 0 ? null : run => Audit(audit, run),
             Check,
-            PrepareAgainAsync);
+            PrepareAgainAsync,
+            engine.Indeterminate is null || Entitlements.Tables.Count == 0 ? null : Indeterminate);
     }
 
     /// <summary>
@@ -320,6 +363,46 @@ public sealed class EntitledQuery
     /// was audited with the preparer's purpose and actor, and with every list it binds at execution
     /// counted as empty (F166).
     /// </remarks>
+    /// <summary>
+    /// An execution's indeterminate decisions, each handed to the engine's observer with what identifies
+    /// the run, as the audit does (F302, design 82).
+    /// </summary>
+    private void Indeterminate(StatementRun run, IReadOnlyList<IndeterminateHeard> records)
+    {
+        var context = run.Context;
+        var trace = System.Diagnostics.Activity.Current?.TraceId.ToString();
+        foreach (var record in records)
+        {
+            var named = record.Tables.Split(", ", StringSplitOptions.RemoveEmptyEntries);
+            var hashes = named
+                .Select(t => Entitlements.Tables.FirstOrDefault(r => $"{r.Schema}.{r.Table}" == t)?.DescriptorHash ?? "")
+                .ToList();
+            _engine.Resolved(new IndeterminateDecision
+            {
+                CorrelationId = record.CorrelationId,
+                TraceId = trace,
+                PlanDigest = run.PlanDigest,
+                Tables = record.Tables,
+                DescriptorHashes = hashes,
+                At = record.AtSource ? IndeterminateAt.Source : IndeterminateAt.ChalkQL,
+                SqlState = record.SqlState,
+                Resolution = record.Settled switch
+                {
+                    IndeterminateSettled.RowsNotAdmitted => ClosedResolution.RowsNotAdmitted,
+                    IndeterminateSettled.RuleNotApplied => ClosedResolution.RuleNotApplied,
+                    IndeterminateSettled.EvaluatedHere => ClosedResolution.EvaluatedHere,
+                    _ => ClosedResolution.StatementWithheld,
+                },
+                Occurrences = record.Occurrences,
+                Reason = record.Reason,
+                Cause = record.Cause,
+                Purpose = context?.Purpose ?? "",
+                Actor = context?.Actor ?? "",
+                Version = run.Version,
+            });
+        }
+    }
+
     private void Audit(IEntitlementsAudit observer, StatementRun run)
     {
         var context = run.Context;

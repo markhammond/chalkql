@@ -67,6 +67,15 @@ message Rel {
   // verifier ceremony and nothing else. `Read.disclosures` is the same thing per column.
   bool policy_injected = 4;
 
+  // Set on the root of the subtree an entitlement barrier stood over (F302, design 82): the entitled
+  // tables it reads, `schema.table`, comma separated. Everything the executor runs beneath is the
+  // policy's own evaluation, and leakproof conditions that crossed into it: a data error raised there
+  // makes the policy's decision for its row indeterminate. A filter beneath does not admit a row whose
+  // condition raises; any other error withholds the statement's result as `PolicyIndeterminate`,
+  // naming these tables and quoting no value. Empty everywhere else. In the digest: a plan that
+  // quarantines and one that does not are different plans.
+  string quarantine = 5;
+
   oneof kind {
     // ---- logical: Substrait-shaped ----
     Read read = 10;

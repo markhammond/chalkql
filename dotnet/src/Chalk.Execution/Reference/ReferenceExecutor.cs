@@ -179,7 +179,45 @@ internal sealed class ReferenceExecutor
             ? "?" + param.Index.ToString(System.Globalization.CultureInfo.InvariantCulture)
             : param.BoundKey;
 
+    /// <summary>
+    /// The quarantine the node being evaluated stands in (F302, design 82): the entitled tables of the
+    /// nearest quarantined node above, or null outside one. The reference evaluates one node at a time.
+    /// </summary>
+    private string? _quarantine;
+
     private async ValueTask<List<object?[]>> EvaluateAsync(
+        Rel rel,
+        string parentPath,
+        ReferenceInterpreter interpreter,
+        ExecutionStats stats,
+        ExecutionArena arena,
+        CancellationToken ct)
+    {
+        if (rel.Quarantine.Length == 0)
+        {
+            return await EvaluateNodeAsync(rel, parentPath, interpreter, stats, arena, ct).ConfigureAwait(false);
+        }
+
+        // The root of a quarantine: what beneath it did not settle closed withholds the result.
+        var outer = _quarantine;
+        _quarantine = rel.Quarantine;
+        try
+        {
+            return await EvaluateNodeAsync(rel, parentPath, interpreter, stats, arena, ct).ConfigureAwait(false);
+        }
+        catch (Exception error) when (IndeterminateLedger.IsDataError(error))
+        {
+            arena.Indeterminate?.Record(rel.Quarantine, IndeterminateResolution.StatementWithheld, 1, error);
+            throw new PolicyIndeterminateException(
+                rel.Quarantine, arena.Indeterminate?.CorrelationId ?? Guid.NewGuid(), IndeterminateLedger.SqlStateOf(error));
+        }
+        finally
+        {
+            _quarantine = outer;
+        }
+    }
+
+    private async ValueTask<List<object?[]>> EvaluateNodeAsync(
         Rel rel,
         string parentPath,
         ReferenceInterpreter interpreter,
@@ -253,12 +291,32 @@ internal sealed class ReferenceExecutor
                 var input = await EvaluateAsync(rel.Filter.Input, path, interpreter, stats, arena, ct)
                     .ConfigureAwait(false);
                 var kept = new List<object?[]>();
+                long settled = 0;
+                Exception? first = null;
                 foreach (var row in input)
                 {
-                    if (interpreter.IsTrue(rel.Filter.Condition, row))
+                    bool pass;
+                    try
+                    {
+                        pass = interpreter.IsTrue(rel.Filter.Condition, row);
+                    }
+                    catch (Exception error) when (_quarantine is not null && IndeterminateLedger.IsDataError(error))
+                    {
+                        // Inside a quarantine a row whose condition raises is not admitted (F302).
+                        settled++;
+                        first ??= error;
+                        pass = false;
+                    }
+
+                    if (pass)
                     {
                         kept.Add(row);
                     }
+                }
+
+                if (first is not null)
+                {
+                    arena.Indeterminate?.Record(_quarantine!, IndeterminateResolution.RowsNotAdmitted, settled, first);
                 }
 
                 return kept;

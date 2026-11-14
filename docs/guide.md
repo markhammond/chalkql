@@ -3686,24 +3686,59 @@ The conditions that cannot leak still reach the source and its indexes. They are
 with comparisons, `AND`, `OR` and `NOT`, the `IS` tests, `IN` lists, `LIKE`, a lossless
 cast, literals and context values, and over those `COALESCE`, `CASE`, `UPPER`, `LOWER`,
 `TRIM`, concatenation, `CHAR_LENGTH`, `FINGERPRINT`, `PRESENT`, `SUBSTRING` with a literal
-length, `ROUND`, `FLOOR` and `CEIL` of a floating-point value, `FLOOR` and `CEIL` of a date
-or a timestamp, and any function you declared `.Leakproof()`. Anything that reads no
+length, `ROUND`, `FLOOR` and `CEIL` of a floating-point value, arithmetic whose result is a
+floating-point value (`+`, `-`, `*`, `/`: an infinity or NaN at the edges, never an error),
+`FLOOR` and `CEIL` of a date or a timestamp, and any function you declared `.Leakproof()`.
+Anything that reads no
 column, such as `@now - INTERVAL '10' MINUTE`, also cannot leak. A join on such a
 condition, an aggregate, a sort and a bound reach the source too. The rest is evaluated
 here, over the rows the source returned.
 
-**A policy's own expressions cannot raise.** A rule's condition, a row predicate and a
-path's predicates are evaluated on rows the principal may not be shown. A mask and a
-placeholder are evaluated in place of the value their rule hides. An error in any of them
-could quote that value, or say that a row exists. So each must be written with what
-cannot raise, the list above, and one that can is refused when the engine is created. The
-refusal names the rule's place and what can fail, for example
-`…(SourceIdentity).rules[0].when: … can raise an error depending on the row: a cast to I32
-can fail`. `.Leakproof()` is your promise that a function raises for no row and says
-nothing of one beyond its value. Nothing can check it, so Chalk relies on it, as
-PostgreSQL relies on `LEAKPROOF`. As a last line, a mask that reads the row is computed so
-that, should it fail all the same, the error names the mask's column and not the value:
-`The mask on main.reports.SourceIdentity could not be computed for a row.`
+**What a policy evaluates is quarantined.** A rule's condition, a row predicate and a path's
+predicates are evaluated on rows the principal may not be shown; a mask and a placeholder in
+place of the value their rule hides. An error there could quote that value, and whether a
+statement failed could say a row exists. So everything a policy evaluates runs in quarantine,
+and when it meets data it cannot decide, such as a cast of a value that does not convert, the
+policy's decision for that row is *indeterminate* and ChalkQL settles it closed:
+
+- **A row predicate or a path's predicate** that raises for a row does not admit the row. So
+  `CAST(level AS INTEGER) <= 2` works as a row predicate as written: a row whose level does not
+  convert is simply not admitted, and the statement answers.
+- **A rule's condition** that raises for a row does not apply its rule: the row gets the next
+  rule, or the `otherwise`, as when the condition is false. A condition that can raise is
+  refused, when the engine is created, in a rule that withholds more than a rule after it, since
+  on an error the row would fall through to something more open; the refusal names both rules.
+- **A mask or a placeholder** must be written with what cannot raise, the list above, and one
+  that can is refused when the engine is created, naming the rule's place and what can fail,
+  for example `…(Lat).rules[0].mask: … the mask can raise an error depending on the row: a
+  division can divide by zero`.
+- **What cannot be settled closed**, a mask that raises after all, withholds the statement's
+  result with a `PolicyIndeterminateException` (`PolicyIndeterminate`): it names the table and
+  a correlation id, and not the reason, which could quote a value the policy hides.
+
+`.Leakproof()` is your promise that a function raises for no row and says nothing of one beyond
+its value. Nothing can check it, so Chalk relies on it, as PostgreSQL relies on `LEAKPROOF`; the
+quarantine is what holds should it be broken.
+
+To see the reasons, for your own logs and triage, register an observer beside the audit:
+
+```csharp
+var entitled = engine.WithEntitlements(options, audit: auditLog, indeterminate: new TriageLog(logger));
+
+sealed class TriageLog(ILogger logger) : IIndeterminateDecisions
+{
+    public void Resolved(IndeterminateDecision d) =>
+        logger.LogWarning("Policy on {Tables}: {Resolution} x{Occurrences} (correlation {CorrelationId}): {Reason}",
+            d.Tables, d.Resolution, d.Occurrences, d.CorrelationId, d.Reason);
+}
+```
+
+It is handed each kind of indeterminate decision once per execution, with how many rows it
+covered, the first one's reason and cause, and the execution's correlation id, the same one a
+withheld result's exception carries. A reason may quote a value the policy hides, so it never
+appears in an exception, and is yours to keep as you keep a database's server log. An exception
+your observer throws is counted on `EntitledEngine.IndeterminateObserverFaults` and never let
+through: a broken logger does not fail a statement that would have answered.
 
 **Masks do not travel.** Take an expression that is not a bare column reference, and
 that reads a column this principal may not see in full. It never enters a source's

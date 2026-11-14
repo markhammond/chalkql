@@ -154,6 +154,14 @@ public final class RelToIr {
 
   /** One relation and everything under it. */
   public Rel toRel(RelNode node) {
+    // A barrier is no operator: it is written as the subtree it stood over, marked as the policy's
+    // quarantine and labelled with the entitled tables beneath (F302, design 82).
+    if (node instanceof chalk.planner.plan.rel.ChalkEntitlementBarrier barrier) {
+      java.util.Set<String> tables = new java.util.TreeSet<>();
+      entitledTables(barrier.getInput(), tables);
+      return quarantined(toRel(barrier.getInput()), tables);
+    }
+
     Rel.Builder builder = Rel.newBuilder();
 
     // The rewrite put this node here rather than the query (step 26, §3.12). It carries no semantics
@@ -1012,6 +1020,100 @@ public final class RelToIr {
   private static boolean isCorrelation(RelNode node) {
     return node instanceof org.apache.calcite.rel.core.TableScan scan
         && chalk.planner.entitlement.CorrelationRelOptTable.isCorrelation(scan.getTable());
+  }
+
+  /** Every entitled table read beneath {@code node}, as {@code schema.table}: a quarantine's label. */
+  /**
+   * {@code rel} with the quarantine marked where the policy's own work begins (F302). An aggregate,
+   * a sort or a bound at the top is the statement's, moved below the fence only because it reads
+   * the rows the policy admitted and nothing else: the quarantine starts beneath it, so a sum that
+   * overflows fails as the statement's own error, not as a decision the policy could not reach. A
+   * quarantine already marked there, a nested fence's, takes these tables too.
+   */
+  private static Rel quarantined(Rel rel, java.util.Set<String> tables) {
+    switch (rel.getKindCase()) {
+      case PROJECT:
+        if (!anchored(rel.getProject().getInput())) {
+          break;
+        }
+        return rel.toBuilder()
+            .setProject(rel.getProject().toBuilder().setInput(quarantined(rel.getProject().getInput(), tables)))
+            .build();
+      case FILTER:
+        if (!anchored(rel.getFilter().getInput())) {
+          break;
+        }
+        return rel.toBuilder()
+            .setFilter(rel.getFilter().toBuilder().setInput(quarantined(rel.getFilter().getInput(), tables)))
+            .build();
+      case SORT:
+        return rel.toBuilder()
+            .setSort(rel.getSort().toBuilder().setInput(quarantined(rel.getSort().getInput(), tables)))
+            .build();
+      case FETCH:
+        return rel.toBuilder()
+            .setFetch(rel.getFetch().toBuilder().setInput(quarantined(rel.getFetch().getInput(), tables)))
+            .build();
+      case TOP_N:
+        return rel.toBuilder()
+            .setTopN(rel.getTopN().toBuilder().setInput(quarantined(rel.getTopN().getInput(), tables)))
+            .build();
+      case AGGREGATE:
+        return rel.toBuilder().setAggregate(aggregateOver(rel.getAggregate(), tables)).build();
+      case HASH_AGGREGATE:
+        return rel.toBuilder()
+            .setHashAggregate(
+                rel.getHashAggregate().toBuilder()
+                    .setAggregate(aggregateOver(rel.getHashAggregate().getAggregate(), tables)))
+            .build();
+      case STREAM_AGGREGATE:
+        return rel.toBuilder()
+            .setStreamAggregate(
+                rel.getStreamAggregate().toBuilder()
+                    .setAggregate(aggregateOver(rel.getStreamAggregate().getAggregate(), tables)))
+            .build();
+      default:
+        break;
+    }
+    if (rel.getQuarantine().isEmpty() && tables.isEmpty()) {
+      return rel;
+    }
+    java.util.Set<String> all = new java.util.TreeSet<>(tables);
+    if (!rel.getQuarantine().isEmpty()) {
+      all.addAll(java.util.List.of(rel.getQuarantine().split(", ")));
+    }
+    return rel.toBuilder().setQuarantine(String.join(", ", all)).build();
+  }
+
+  /**
+   * Whether an aggregate, a sort or a bound of the statement's stands at the top of {@code rel},
+   * under projections and filters alone: those are then the statement's too, its leakproof work over
+   * the aggregate's output, moved below the fence with it. The policy's own projection and filter
+   * are beneath every such step, since the policy is applied to the table before the statement is.
+   */
+  private static boolean anchored(Rel rel) {
+    return switch (rel.getKindCase()) {
+      case SORT, FETCH, TOP_N, AGGREGATE, HASH_AGGREGATE, STREAM_AGGREGATE -> true;
+      case PROJECT -> anchored(rel.getProject().getInput());
+      case FILTER -> anchored(rel.getFilter().getInput());
+      default -> false;
+    };
+  }
+
+  private static chalk.ir.v1.Aggregate aggregateOver(
+      chalk.ir.v1.Aggregate aggregate, java.util.Set<String> tables) {
+    return aggregate.toBuilder().setInput(quarantined(aggregate.getInput(), tables)).build();
+  }
+
+  private static void entitledTables(RelNode node, java.util.Set<String> into) {
+    org.apache.calcite.plan.RelOptTable table = node.getTable();
+    if (table != null && chalk.planner.entitlement.EntitledRelOptTable.disclosureOf(table) != null) {
+      List<String> name = table.getQualifiedName();
+      into.add(String.join(".", name.subList(Math.max(0, name.size() - 2), name.size())));
+    }
+    for (RelNode input : node.getInputs()) {
+      entitledTables(input, into);
+    }
   }
 
   /** Whether this rel's table carries a disclosure map, which is what {@code policy_injected} says. */

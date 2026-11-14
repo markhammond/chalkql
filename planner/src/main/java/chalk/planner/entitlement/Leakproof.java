@@ -35,7 +35,8 @@ import org.checkerframework.checker.nullness.qual.Nullable;
  * FINGERPRINT} and {@code PRESENT}, which answer NULL for a NULL and nothing else; concatenation and
  * {@code CHAR_LENGTH}; {@code SUBSTRING} whose length is absent or a literal that is not negative,
  * the one thing the function refuses; and {@code ROUND}, {@code FLOOR} and {@code CEIL} over a
- * floating-point value, which cannot overflow as a decimal's can, and {@code FLOOR} and {@code
+ * floating-point value, which cannot overflow as a decimal's can, {@code + - * /} and negation over
+ * floating-point values (IEEE: an infinity or NaN at the edges, never an error), and {@code FLOOR} and {@code
  * CEIL} of a date or a timestamp to a unit. A host function its catalog declares leakproof is the
  * host's promise and is taken at its word, as PostgreSQL takes {@code LEAKPROOF}. Every one of them is
  * barrier-relevant as well: a condition written with them crosses the barrier and reaches the
@@ -49,8 +50,8 @@ public final class Leakproof {
       "comparisons, AND, OR and NOT, the IS tests, IN lists, LIKE, lossless casts, literals and"
           + " context values, and COALESCE, CASE, UPPER, LOWER, TRIM, concatenation, CHAR_LENGTH,"
           + " FINGERPRINT, PRESENT, SUBSTRING of a literal length, ROUND, FLOOR and CEIL of a"
-          + " floating-point value, FLOOR and CEIL of a date or a timestamp, and host functions"
-          + " declared leakproof, over those";
+          + " floating-point value, arithmetic over floating-point values, FLOOR and CEIL of a date"
+          + " or a timestamp, and host functions declared leakproof, over those";
 
   /** The kinds whose own evaluation cannot raise, given operands that cannot. */
   private static final Set<SqlKind> KINDS =
@@ -87,11 +88,14 @@ public final class Leakproof {
           SqlStdOperatorTable.CHAR_LENGTH,
           SqlStdOperatorTable.CHARACTER_LENGTH,
           ChalkOperatorTable.FINGERPRINT,
-          ChalkOperatorTable.PRESENT,
-          ChalkOperatorTable.MASKED);
+          ChalkOperatorTable.PRESENT);
 
   /** Whether {@code rex} cannot raise, or fail, differently from one row to the next. */
   public static boolean is(RexNode rex) {
+    // A guard answers NULL where its condition raises (F302), so it raises for no row itself.
+    if (rex instanceof RexCall guarded && guarded.getOperator() == ChalkOperatorTable.GUARDED) {
+      return true;
+    }
     if (!RexUtil.containsInputRef(rex) && !containsCorrelation(rex)) {
       return true;
     }
@@ -127,7 +131,36 @@ public final class Leakproof {
         || (call.getKind() == SqlKind.CAST && RexUtil.isLosslessCast(call))
         || substringOfLiteralLength(call)
         || roundingOfFloatingPoint(call)
+        || floatingPointArithmetic(call)
         || declaredLeakproof(call);
+  }
+
+  /**
+   * {@code + - * /} and negation whose result is floating point, over numeric operands (F302,
+   * design 82 §5): IEEE arithmetic gives a value for every input, an infinity or NaN at the edges,
+   * and never raises in ChalkQL's executors. Integer and decimal arithmetic raise on overflow, and
+   * date arithmetic is not this, so neither counts. A database may raise where ChalkQL does not
+   * (PostgreSQL does on overflow and on division by zero), which is the pushdown gate's question and
+   * the quarantine's fallback, not this one.
+   */
+  private static boolean floatingPointArithmetic(RexCall call) {
+    boolean arithmetic =
+        switch (call.getKind()) {
+          case PLUS, MINUS, TIMES, DIVIDE, MINUS_PREFIX, PLUS_PREFIX -> true;
+          default -> false;
+        };
+    if (!arithmetic || !SqlTypeUtil.isApproximateNumeric(call.getType())) {
+      return false;
+    }
+    // Computed in floating point whatever its operands are: an integer literal or column beside a
+    // double is widened, not divided by as an integer. An operand's own expression is judged as
+    // itself, so an integer `RadiusNm - 2` inside still counts against the whole.
+    for (RexNode operand : call.getOperands()) {
+      if (!SqlTypeUtil.isNumeric(operand.getType())) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

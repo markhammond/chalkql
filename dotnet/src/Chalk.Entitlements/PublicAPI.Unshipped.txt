@@ -375,7 +375,7 @@ override Chalk.Entitlements.Rpc.ExplainedStep.GetHashCode() -> int
 override Chalk.Entitlements.Rpc.ExplainedTable.GetHashCode() -> int
 override Chalk.Entitlements.Rpc.Redaction.GetHashCode() -> int
 override Chalk.Entitlements.Rpc.TestedColumn.GetHashCode() -> int
-static Chalk.Entitlements.ChalkEngineEntitlements.WithEntitlements(this Chalk.Client.ChalkEngine! engine, Chalk.Entitlements.EntitlementsOptions? options = null, Chalk.Entitlements.IEntitlementsAudit? audit = null) -> Chalk.Entitlements.EntitledEngine!
+static Chalk.Entitlements.ChalkEngineEntitlements.WithEntitlements(this Chalk.Client.ChalkEngine! engine, Chalk.Entitlements.EntitlementsOptions? options = null, Chalk.Entitlements.IEntitlementsAudit? audit = null, Chalk.Entitlements.IIndeterminateDecisions? indeterminate = null) -> Chalk.Entitlements.EntitledEngine!
 static Chalk.Entitlements.EntitledQuery.implicit operator Chalk.Client.PreparedQuery!(Chalk.Entitlements.EntitledQuery! entitled) -> Chalk.Client.PreparedQuery!
 static Chalk.Entitlements.EntitlementsReport.Empty.get -> Chalk.Entitlements.EntitlementsReport!
 ~Chalk.Entitlements.Rpc.EntitledTable.Clone() -> Chalk.Entitlements.Rpc.EntitledTable
@@ -560,3 +560,45 @@ static Chalk.Entitlements.EntitlementsReport.Empty.get -> Chalk.Entitlements.Ent
 ~static Chalk.Entitlements.Rpc.Redaction.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.Redaction>
 ~static Chalk.Entitlements.Rpc.TestedColumn.Descriptor.get -> Google.Protobuf.Reflection.MessageDescriptor
 ~static Chalk.Entitlements.Rpc.TestedColumn.Parser.get -> Google.Protobuf.MessageParser<Chalk.Entitlements.Rpc.TestedColumn>
+Chalk.Entitlements.ClosedResolution
+Chalk.Entitlements.ClosedResolution.EvaluatedHere = 2 -> Chalk.Entitlements.ClosedResolution
+Chalk.Entitlements.ClosedResolution.RowsNotAdmitted = 0 -> Chalk.Entitlements.ClosedResolution
+Chalk.Entitlements.ClosedResolution.RuleNotApplied = 1 -> Chalk.Entitlements.ClosedResolution
+Chalk.Entitlements.ClosedResolution.StatementWithheld = 3 -> Chalk.Entitlements.ClosedResolution
+Chalk.Entitlements.EntitledEngine.IndeterminateObserverFaults.get -> long
+Chalk.Entitlements.EntitledEngine.LastIndeterminateObserverFault.get -> System.Type?
+Chalk.Entitlements.IIndeterminateDecisions
+Chalk.Entitlements.IIndeterminateDecisions.Resolved(Chalk.Entitlements.IndeterminateDecision! decision) -> void
+Chalk.Entitlements.IndeterminateAt
+Chalk.Entitlements.IndeterminateAt.ChalkQL = 0 -> Chalk.Entitlements.IndeterminateAt
+Chalk.Entitlements.IndeterminateAt.Source = 1 -> Chalk.Entitlements.IndeterminateAt
+Chalk.Entitlements.IndeterminateDecision
+Chalk.Entitlements.IndeterminateDecision.Actor.get -> string!
+Chalk.Entitlements.IndeterminateDecision.Actor.init -> void
+Chalk.Entitlements.IndeterminateDecision.At.get -> Chalk.Entitlements.IndeterminateAt
+Chalk.Entitlements.IndeterminateDecision.At.init -> void
+Chalk.Entitlements.IndeterminateDecision.Cause.get -> System.Exception!
+Chalk.Entitlements.IndeterminateDecision.Cause.init -> void
+Chalk.Entitlements.IndeterminateDecision.CorrelationId.get -> System.Guid
+Chalk.Entitlements.IndeterminateDecision.CorrelationId.init -> void
+Chalk.Entitlements.IndeterminateDecision.DescriptorHashes.get -> System.Collections.Generic.IReadOnlyList<string!>!
+Chalk.Entitlements.IndeterminateDecision.DescriptorHashes.init -> void
+Chalk.Entitlements.IndeterminateDecision.IndeterminateDecision() -> void
+Chalk.Entitlements.IndeterminateDecision.Occurrences.get -> long
+Chalk.Entitlements.IndeterminateDecision.Occurrences.init -> void
+Chalk.Entitlements.IndeterminateDecision.PlanDigest.get -> ulong
+Chalk.Entitlements.IndeterminateDecision.PlanDigest.init -> void
+Chalk.Entitlements.IndeterminateDecision.Purpose.get -> string!
+Chalk.Entitlements.IndeterminateDecision.Purpose.init -> void
+Chalk.Entitlements.IndeterminateDecision.Reason.get -> string!
+Chalk.Entitlements.IndeterminateDecision.Reason.init -> void
+Chalk.Entitlements.IndeterminateDecision.Resolution.get -> Chalk.Entitlements.ClosedResolution
+Chalk.Entitlements.IndeterminateDecision.Resolution.init -> void
+Chalk.Entitlements.IndeterminateDecision.SqlState.get -> string?
+Chalk.Entitlements.IndeterminateDecision.SqlState.init -> void
+Chalk.Entitlements.IndeterminateDecision.Tables.get -> string!
+Chalk.Entitlements.IndeterminateDecision.Tables.init -> void
+Chalk.Entitlements.IndeterminateDecision.TraceId.get -> string?
+Chalk.Entitlements.IndeterminateDecision.TraceId.init -> void
+Chalk.Entitlements.IndeterminateDecision.Version.get -> long?
+Chalk.Entitlements.IndeterminateDecision.Version.init -> void

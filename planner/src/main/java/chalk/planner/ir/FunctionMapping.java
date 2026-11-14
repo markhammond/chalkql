@@ -110,8 +110,8 @@ public final class FunctionMapping {
     // The entitlement layer's two (step 26, 16-entitlements.md §4), Chalk's own like TIME_BUCKET.
     map.put("FINGERPRINT", FunctionId.FUNCTION_ID_FINGERPRINT);
     map.put("PRESENT", FunctionId.FUNCTION_ID_PRESENT);
-    // The pass's own wrapper of a mask (F300), never a statement's.
-    map.put("$CHALK$MASKED", FunctionId.FUNCTION_ID_MASKED);
+    // The pass's own guard round a rule's condition (F302), never a statement's.
+    map.put("$CHALK$GUARDED", FunctionId.FUNCTION_ID_GUARDED);
     return Map.copyOf(map);
   }
 

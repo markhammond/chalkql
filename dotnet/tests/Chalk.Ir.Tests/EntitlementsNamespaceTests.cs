@@ -38,6 +38,7 @@ public sealed class EntitlementsNamespaceTests
         {
             RowType = row,
             PolicyInjected = true,
+            Quarantine = schema + ".orders",
             Read = new Read
             {
                 Table = new TableRef { SourceId = schema + "-mem", Schema = schema, Table = "orders" },
