@@ -97,6 +97,93 @@ class EntitlementPushdownTest {
         .isEqualTo(2);
   }
 
+  // ------------------------------------------------------------------ quarantine (design 82 §6)
+
+  /**
+   * A part of the row predicate that can raise for a row stays here, under the quarantine, and the
+   * rest still reaches the source: the source is never asked to cast text it could fail on.
+   */
+  @Test
+  void a_row_predicates_part_that_can_raise_stays_here() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            withRowPredicate(
+                "(org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs))"
+                    + " AND CAST(postcode AS INTEGER) > 1000"),
+            "SELECT id FROM remote.members",
+            TenancyCatalogs.manager(1, 2));
+
+    String sql = onlyRemote(result).getQueryText();
+    assertThat(sql).contains("\"org_id\" IN (1, 2)");
+    assertThat(sql).doesNotContainIgnoringCase("CAST").doesNotContain("1000");
+    assertThat(result.physicalPlanText()).contains("1000");
+  }
+
+  /** Floating-point arithmetic raises for no row in ChalkQL, and goes to the source. */
+  @Test
+  void a_row_predicates_floating_point_arithmetic_reaches_the_source() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            withRowPredicate(
+                "(org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs)) AND id / 2.5E0 > 1"),
+            "SELECT id FROM remote.members",
+            TenancyCatalogs.manager(1, 2));
+
+    assertThat(onlyRemote(result).getQueryText()).contains("\"org_id\" IN (1, 2)").contains("2.5");
+    assertThat(result.pushedRowPredicates()).containsExactly("remote.members");
+  }
+
+  /** The same with a decimal literal, which the predicate compares in floating point. */
+  @Test
+  void a_row_predicates_division_by_a_column_is_reported_as_pushed() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            withRowPredicate(
+                "(org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs))"
+                    + " AND CAST(id AS DOUBLE) / CAST(org_id AS DOUBLE) < 2.0"),
+            "SELECT id FROM remote.members",
+            TenancyCatalogs.manager(1, 2));
+
+    assertThat(onlyRemote(result).getQueryText()).contains("2.0");
+    assertThat(result.pushedRowPredicates()).containsExactly("remote.members");
+  }
+
+  /**
+   * F304: a row predicate over a column the statement does not read reaches the source under a pushed
+   * projection that pruned columns, and is reported as pushed: read through the scan alone, the
+   * filter's columns were numbered as the table's, and {@code postcode} was taken for {@code org_id}.
+   */
+  @Test
+  void a_row_predicate_under_a_pruning_projection_is_reported_as_pushed() throws Exception {
+    PlannerPipeline.Result result =
+        plan(
+            withRowPredicate(
+                "(org_id IN (@ctx.manager_orgs) OR org_id IN (@ctx.agent_orgs)) AND postcode <> 'none'"),
+            "SELECT id FROM remote.members",
+            TenancyCatalogs.manager(1, 2));
+
+    assertThat(onlyRemote(result).getQueryText()).contains("'none'");
+    assertThat(result.pushedRowPredicates()).containsExactly("remote.members");
+  }
+
+  private static CatalogContext withRowPredicate(String predicate) {
+    CatalogContext catalog = TenancyCatalogs.remote();
+    chalk.ir.v1.Schema remote = catalog.getSchemas(1);
+    for (int i = 0; i < remote.getTablesCount(); i++) {
+      chalk.ir.v1.Table table = remote.getTables(i);
+      if (table.getName().equals("members")) {
+        remote =
+            remote.toBuilder()
+                .setTables(
+                    i,
+                    table.toBuilder()
+                        .setEntitlement(table.getEntitlement().toBuilder().setRowPredicate(predicate)))
+                .build();
+      }
+    }
+    return catalog.toBuilder().setSchemas(1, remote).build();
+  }
+
   /**
    * The statement's aggregate, moved below the fence, stands outside the quarantine: it begins at
    * the policy's own work beneath, so a sum that overflows is the statement's error.

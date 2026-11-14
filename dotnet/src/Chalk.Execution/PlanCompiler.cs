@@ -445,6 +445,8 @@ internal static class PlanCompiler
 
             var schema = ArrowTypeMapping.ToArrowSchema(rel.RowType);
             var rendered = RenderedBounds(query, indexes, path);
+            var quarantine = _quarantine;
+            var fallback = quarantine is null ? null : Fallback(query, path);
             return context => new RemoteQueryOperator(
                 context,
                 path,
@@ -455,7 +457,129 @@ internal static class PlanCompiler
                 context.Settings.SourceTimeout(query.SourceId),
                 schema,
                 Types(rel.RowType),
-                Redacted(query.QueryText));
+                Redacted(query.QueryText),
+                quarantine,
+                fallback);
+        }
+
+        /// <summary>
+        /// What a pushed query in a quarantine falls back to when its source raises before it sends a
+        /// row (F302, design 82 §6): the pushed plan run here, each read a plain scan and its source
+        /// predicate a filter ChalkQL evaluates in the same quarantine. Null where that may not happen:
+        /// a table whose policy must be enforced at the source, and a pushed plan this executor cannot
+        /// run, which a query that ran before this change must still prepare with. Compiled at prepare,
+        /// so a failure costs no planning.
+        /// </summary>
+        private OperatorFactory? Fallback(Chalk.Ir.RemoteQuery query, string path)
+        {
+            if (query.PushedPlan is null)
+            {
+                return null;
+            }
+
+            var local = query.PushedPlan.Clone();
+            if (!Unpush(local))
+            {
+                return null;
+            }
+
+            try
+            {
+                return Node(local, $"{path}/Fallback");
+            }
+            catch (ChalkException)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Rewrites, in place, every read in <paramref name="message"/> that carries a source predicate
+        /// into a projection over a filter over a read of every column: the predicate is over the
+        /// table's row, which the full read is. False if a read is of a table whose policy must be
+        /// enforced at the source.
+        /// </summary>
+        private bool Unpush(Google.Protobuf.IMessage message)
+        {
+            if (message is Rel { KindCase: Rel.KindOneofCase.Read } rel)
+            {
+                return Unpushed(rel);
+            }
+
+            foreach (var field in message.Descriptor.Fields.InFieldNumberOrder())
+            {
+                if (field.FieldType != Google.Protobuf.Reflection.FieldType.Message)
+                {
+                    continue;
+                }
+
+                var value = field.Accessor.GetValue(message);
+                if (field.IsRepeated)
+                {
+                    foreach (var item in (System.Collections.IList)value)
+                    {
+                        if (item is Google.Protobuf.IMessage child && !Unpush(child))
+                        {
+                            return false;
+                        }
+                    }
+                }
+                else if (value is Google.Protobuf.IMessage child && !Unpush(child))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool Unpushed(Rel rel)
+        {
+            var read = rel.Read;
+            if (_catalog.FindTable(read.Table.Schema, read.Table.Table) is not { } descriptor
+                || descriptor.Table.Entitlement is { Enforcement: Chalk.Entitlements.Enforcement.PushdownRequired })
+            {
+                return false;
+            }
+
+            if (read.Filter is null)
+            {
+                return true;
+            }
+
+            var columns = descriptor.Table.Columns;
+            var whole = new RowType();
+            var scan = read.Clone();
+            scan.Filter = null;
+            scan.RowGoal = 0;
+            scan.Projection.Clear();
+            for (var i = 0; i < columns.Count; i++)
+            {
+                scan.Projection.Add((uint)i);
+                whole.Fields.Add(new Field { Name = columns[i].Name, Type = columns[i].Type.ToProto() });
+            }
+
+            var filter = new Rel
+            {
+                RowType = whole,
+                Filter = new Filter
+                {
+                    Input = new Rel { RowType = whole.Clone(), Read = scan },
+                    Condition = read.Filter,
+                },
+            };
+            var project = new Project { Input = filter };
+            foreach (var column in read.Projection)
+            {
+                project.Exprs.Add(new Expr
+                {
+                    Type = whole.Fields[(int)column].Type,
+                    FieldRef = new FieldRef { Index = column },
+                });
+            }
+
+            rel.Project = project;
+            return true;
         }
 
         /// <summary>

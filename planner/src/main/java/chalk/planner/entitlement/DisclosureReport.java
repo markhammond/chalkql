@@ -230,7 +230,7 @@ public final class DisclosureReport {
       if (scan != null) {
         String table = EntitledRelOptTable.disclosureOf(scan.getTable()).qualifiedName();
         RexNode required = rowPredicates.get(table);
-        if (required == null || carries(filter.getCondition(), scan, required, rexBuilder)) {
+        if (required == null || carries(filter.getCondition(), filter.getInput(), scan, required, rexBuilder)) {
           pushed.add(table);
         }
       }
@@ -256,11 +256,15 @@ public final class DisclosureReport {
    * in does not decide the answer. A recorded conjunct that reads a context relation is carried by a
    * key set over the same columns, which is the only way such a list reaches a source.
    */
-  private static boolean carries(RexNode condition, TableScan scan, RexNode required, RexBuilder rexBuilder) {
-    List<Integer> projection =
-        scan instanceof SourceScan source
-            ? source.projection()
-            : ImmutableIntList.identity(scan.getRowType().getFieldCount());
+  private static boolean carries(
+      RexNode condition, RelNode input, TableScan scan, RexNode required, RexBuilder rexBuilder) {
+    List<Integer> projection = ordinals(input);
+    if (projection == null) {
+      projection =
+          scan instanceof SourceScan source
+              ? source.projection()
+              : ImmutableIntList.identity(scan.getRowType().getFieldCount());
+    }
     List<RexNode> carried = new ArrayList<>();
     for (RexNode conjunct : RelOptUtil.conjunctions(condition)) {
       carried.add(normalise(remap(conjunct, projection, rexBuilder), rexBuilder));
@@ -322,7 +326,7 @@ public final class DisclosureReport {
       return false;
     }
     if (node instanceof SourceRels.SourceFilter filter
-        && carries(filter.getCondition(), scan, required, rexBuilder)) {
+        && carries(filter.getCondition(), filter.getInput(), scan, required, rexBuilder)) {
       return true;
     }
     for (RelNode input : node.getInputs()) {
@@ -359,6 +363,43 @@ public final class DisclosureReport {
   }
 
   /** Input references renumbered through the scan's projection into the table's own columns. */
+  /**
+   * The table's own column behind each of {@code rel}'s output columns, through the filters and the
+   * projections between a pushed filter and its scan (F304), or null where something else stands
+   * between. A projection that computes a column has none behind it, and gets an ordinal past the
+   * table's so that no conjunct over it matches a recorded one. Read through the scan's projection
+   * alone, a filter over a projection that pruned columns was read in the wrong numbering, and a row
+   * predicate that reached its source was reported as kept here.
+   */
+  private static @Nullable List<Integer> ordinals(RelNode rel) {
+    RelNode node = resolve(rel);
+    if (node instanceof SourceScan source) {
+      return source.projection();
+    }
+    if (node instanceof TableScan scan) {
+      return ImmutableIntList.identity(scan.getRowType().getFieldCount());
+    }
+    if (node instanceof org.apache.calcite.rel.core.Filter filter) {
+      return ordinals(filter.getInput());
+    }
+    if (node instanceof org.apache.calcite.rel.core.Project project) {
+      List<Integer> in = ordinals(project.getInput());
+      if (in == null) {
+        return null;
+      }
+      List<Integer> out = new ArrayList<>(project.getProjects().size());
+      int computed = Integer.MAX_VALUE / 2;
+      for (RexNode expr : project.getProjects()) {
+        out.add(
+            expr instanceof RexInputRef ref && ref.getIndex() < in.size()
+                ? in.get(ref.getIndex())
+                : computed++);
+      }
+      return out;
+    }
+    return null;
+  }
+
   private static RexNode remap(RexNode node, List<Integer> projection, RexBuilder rexBuilder) {
     return node.accept(
         new RexShuttle() {

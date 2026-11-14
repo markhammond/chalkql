@@ -151,7 +151,7 @@ internal sealed class MaintainedCompiler
                 return Island(rel, path);
             }
 
-            return rel.KindCase switch
+            return Quarantined(rel, rel.KindCase switch
             {
                 Rel.KindOneofCase.Read => Read(rel, path),
                 Rel.KindOneofCase.IndexLookup => Lookup(rel, path),
@@ -181,12 +181,26 @@ internal sealed class MaintainedCompiler
                 Rel.KindOneofCase.SharedRef => Shared(rel, path),
                 Rel.KindOneofCase.Window => WindowCalls(rel, path),
                 _ => throw new NotMaintainedException(Unmaintained(rel)),
-            };
+            });
         }
         catch (NotMaintainedException refusal) when (refusal.Path is null)
         {
             throw new NotMaintainedException(refusal.Message) { Path = path };
         }
+    }
+
+    /// <summary>
+    /// The maintained form of a quarantine's root stands in the same quarantine (F302, design 82 §7): an
+    /// update that raises inside it is settled, or withheld, as an execution's is, and quotes nothing.
+    /// </summary>
+    private static Rel Quarantined(Rel original, Rel maintained)
+    {
+        if (original.Quarantine.Length > 0 && maintained.Quarantine.Length == 0)
+        {
+            maintained.Quarantine = original.Quarantine;
+        }
+
+        return maintained;
     }
 
     private static string Unmaintained(Rel rel) => rel.KindCase switch

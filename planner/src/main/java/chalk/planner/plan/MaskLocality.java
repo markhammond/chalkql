@@ -176,6 +176,9 @@ public final class MaskLocality {
      * declares.
      */
     public boolean pushable(RexNode expr, PushdownGate gate) {
+      if (canRaise(expr)) {
+        return false;
+      }
       if (!any || expr instanceof RexInputRef) {
         return true;
       }
@@ -183,6 +186,34 @@ public final class MaskLocality {
         return true;
       }
       return !readsWithheld(expr);
+    }
+
+    /**
+     * Whether {@code expr} could raise for a row, which keeps it out of the source (F302, design 82
+     * §6). Below the barrier everything the statement wrote is leakproof already, so what this keeps
+     * here is the policy's own expression that is not: a cast of text, exact arithmetic, a function
+     * not declared leakproof. ChalkQL evaluates it over the rows the source returns, under the
+     * quarantine, where a row it raises for is decided closed. What ChalkQL judges leakproof goes, and
+     * a database that raises on it all the same (PostgreSQL on a floating-point division by zero) is
+     * the executor's fallback to answer. A key set is the engine's own lookup, over a column and a
+     * bound set, and raises for no row.
+     */
+    private static boolean canRaise(RexNode expr) {
+      if (ChalkKeySet.is(expr)) {
+        return false;
+      }
+      if (expr instanceof org.apache.calcite.rex.RexCall call
+          && (call.getKind() == org.apache.calcite.sql.SqlKind.AND
+              || call.getKind() == org.apache.calcite.sql.SqlKind.OR
+              || call.getKind() == org.apache.calcite.sql.SqlKind.NOT)) {
+        for (RexNode operand : call.getOperands()) {
+          if (canRaise(operand)) {
+            return true;
+          }
+        }
+        return false;
+      }
+      return !chalk.planner.entitlement.Leakproof.is(expr);
     }
 
     /** Whether every one of {@code exprs} may (the projection's question). */

@@ -137,12 +137,17 @@ internal sealed class IndeterminateLedger
     {
         var state = SqlStateOf(cause);
         var atSource = false;
+        string? sourceId = null;
         for (var at = cause; at is not null; at = at.InnerException)
         {
-            atSource |= at is DbException;
+            atSource |= at is DbException or SourceExecutionException;
+            if (at is SourceExecutionException failed)
+            {
+                sourceId ??= failed.SourceId;
+            }
         }
 
-        return (atSource, null, state);
+        return (atSource, sourceId, state);
     }
 
     private sealed class Entry(Exception cause, bool atSource, string? sourceId, string? sqlState)

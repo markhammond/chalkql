@@ -1674,8 +1674,15 @@ public sealed class QueryExecution : IAsyncDisposable
             record.AtSource,
             record.SqlState);
 
+    /// <summary>
+    /// What a reason quotes: the error itself, under the wrappers that attribute it to an operator or a
+    /// source, so a source's reason is what its provider said and not the query text it ran.
+    /// </summary>
     private static Exception Innermost(Exception error) =>
-        error is Chalk.Sources.ExecutionException { InnerException: { } inner } ? Innermost(inner) : error;
+        error is Chalk.Sources.ExecutionException or Chalk.Sources.SourceExecutionException
+        && error.InnerException is { } inner
+            ? Innermost(inner)
+            : error;
 
     private Chalk.Sources.RetainedTables? _readAt;
 
