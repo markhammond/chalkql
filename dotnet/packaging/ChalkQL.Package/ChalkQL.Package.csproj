@@ -23,16 +23,17 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.7.1 is a security release: upgrade if you use entitlements.
+      ChalkQL 0.8.0 hardens disclosure when a policy meets a runtime error, for example from a data source's quirks, without giving up query plan optimisation.
 
-      - **Entitled tables are barriers:** a condition put round an entitled table is evaluated only on the rows the policy admits. Before, an error could quote a value of a row the principal was not shown, and whether a statement failed could reveal whether such a row existed. A security advisory on the repository describes it. A condition that cannot raise, an ORDER BY on columns, joins, aggregates and bounds still reach the source and its indexes; a condition that can raise now runs locally over the admitted rows.
-      - **CASE:** a branch runs only for the rows that take it, so CASE WHEN x &lt;&gt; 0 THEN y / x END guards the division.
-      - **Planner clients:** engines may share one; it is disposed with the last of them, and an engine made on a client already disposed that way is refused when it is made.
-      - **Licence:** the package carries the Elastic License 2.0 text; earlier packages named an empty licence file.
-      - **Compatibility:** no change to the API surface, the protocol or the IR. The barrier is the planner's, which ships inside this package.
+      - **Casts and floating-point arithmetic in policies:** CAST(level AS INTEGER) &lt;= 2 works as a row filter, and ROUND(score * 4, 0) / 4 as a mask. A mask or placeholder that can fail is refused when the engine is created, naming the rule and the call.
+      - **Settled closed:** a row filter that fails for a row leaves it out; a rule condition that fails falls through to the next rule. What cannot be settled stops the query with PolicyIndeterminateException, naming the table and a correlation id, never the value.
+      - **Observer:** WithEntitlements(options, audit:, indeterminate:) takes an IIndeterminateDecisions that hears each decision with its reason, a count and the correlation id.
+      - **Databases:** a policy's part that can fail is evaluated by ChalkQL, not sent; a database that fails anyway before returning a row has its table read again and the policy evaluated here. Maintained views settle the same way at each update.
+      - **Fixes:** AND, OR and CASE WHEN evaluate later operands only for undecided rows; casts in comparisons are kept in SQL sent to sources (SQLite had compared text); a pushed row filter under a pruning projection is recognised; a BOOLEAN mask on a path-entitled table prepares for a context's shape.
+      - **Compatibility:** new API for indeterminate decisions. The IR gains Rel.quarantine and GUARDED: a 0.8 engine refuses an entitled plan from an earlier planner, so upgrade ChalkQL and ChalkQL.Sources together. A query a raising policy condition used to fail now answers.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.7.1
+      https://github.com/markhammond/chalkql/releases/tag/v0.8.0
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
