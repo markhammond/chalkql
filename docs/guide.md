@@ -3807,6 +3807,65 @@ One remaining channel is documented rather than closed. Error text from a functi
 fails on some inputs, in a statement shape the developer wrote, may quote a non-entitled
 column of an excluded row.
 
+### Letting users write conditions
+
+Some applications let their users write a condition themselves. An alerts screen is the usual
+case: a user types "tell me when an order over 10,000 is filled" as
+`status = 'Filled' AND qty > 10000`, and the application runs it over the orders that user is
+allowed to see. The same goes for a saved filter, a watch list or a rule in a rule book. It saves
+you from building a form for every question a user might ask, and the policy still decides what
+each user sees.
+
+**Put the user's condition round your statement, not inside it.** Run the statement you wrote for
+that user, and filter its rows with their condition:
+
+```sql
+SELECT * FROM (
+  SELECT order_id, status, qty FROM orders
+) AS t
+WHERE (
+  status = 'Filled' AND qty > 10000
+)
+```
+
+The condition then reads only the rows the user's statement returns, after the policy has decided
+them, and only the columns that statement shows. It is the user's own query, so its errors are
+theirs: a condition that divides by zero fails the query with its own message, as anywhere else.
+That holds inside a sub-query too.
+
+**Put the user's text on its own lines.** `--` starts a comment that runs to the end of the line,
+and so, today, does `//`. Calcite reads both, and ChalkQL will refuse `//` in a later release.
+With the user's text on its own lines, as above, a comment can only hide the rest of their own
+text, never your closing parenthesis or anything after it.
+
+**Check the result, not the text.** A user can still write text that changes the query's shape,
+such as `qty > 0) UNION (SELECT …`. Everything still runs under that user's policy, so they can't
+see more than they are allowed to. But check that the prepared query returns your statement's
+columns before you keep the condition. `PrepareAsync` reads no rows, and the `OutputSchema` of the
+`PreparedQuery` it returns lists the columns (see
+[The shape of a result, before it runs](#the-shape-of-a-result-before-it-runs)).
+
+**Let ChalkQL check the condition, as the user types.** An editor, a syntax highlighter or a
+language server that reads conditions itself should treat `--` and `//` as comments to the end of
+the line. It should also read `'…'` as a string, with `''` for a quote inside it, and `"…"` as a
+name. The simplest check that agrees with ChalkQL is to prepare the composed query. A refusal
+carries a code (see [Errors and their codes](#errors-and-their-codes)) that an editor can show
+beside the text. Preparing reads no rows. Once a condition is saved, keep its `PreparedQuery` and
+run that each time, rather than preparing the text again.
+
+**Check a policy by building an engine.** If users write the policy's own rules, in an
+administration screen say, know that a rule's condition and mask are checked when an engine is
+created, not when the policy is declared or compiled. A condition that names no column, a mask of
+the wrong type, or one that can fail is refused by `ChalkEngine.CreateAsync`. So an authoring tool
+should build an engine over the catalog to check a change before it saves it. A refusal names a
+rule by its place among the rules for that column (`…columns[0] (Lat).rules[1].when`), which is
+not always its place in the list you declared.
+
+**A placeholder is what a statement sees.** Where a rule shows a placeholder in place of a value,
+a condition or a join on that column sees the placeholder, not the value. A join on a column every
+user sees as `'NOWHERE'` matches nothing. That is by design: a statement sees what its user sees.
+So write conditions and joins on columns the user is shown in full.
+
 ## Errors and their codes
 
 Every exception ChalkQL raises on purpose names the rules it breaks. `Violations` lists them,
