@@ -23,7 +23,7 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL 0.8.0 lets an access policy cast and compute, and settles what a policy cannot decide without saying anything about the row.
+      ChalkQL 0.8.0 hardens disclosure when a policy meets a runtime error, for example from a data source's quirks, without giving up query plan optimisation.
 
       - **Casts and floating-point arithmetic in policies:** CAST(level AS INTEGER) &lt;= 2 works as a row filter, and ROUND(score * 4, 0) / 4 as a mask. A mask or placeholder that can fail is refused when the engine is created, naming the rule and the call.
       - **Settled closed:** a row filter that fails for a row leaves it out; a rule condition that fails falls through to the next rule. What cannot be settled stops the query with PolicyIndeterminateException, naming the table and a correlation id, never the value.
