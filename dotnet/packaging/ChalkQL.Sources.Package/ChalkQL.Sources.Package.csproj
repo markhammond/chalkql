@@ -13,12 +13,12 @@
     <PackageProjectUrl>https://github.com/markhammond/chalkql</PackageProjectUrl>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReleaseNotes>
-      ChalkQL.Sources 0.7.1 accompanies ChalkQL 0.7.1. Its only change of its own is that the package now carries the Elastic License 2.0 text.
+      ChalkQL.Sources 0.8.0 accompanies ChalkQL 0.8.0, with no changes of its own. The SQL ChalkQL 0.8.0 sends these sources keeps a cast of a text column in a comparison, which SQLite had compared as text.
 
-      Requires exactly ChalkQL 0.7.1.
+      Requires exactly ChalkQL 0.8.0.
 
       Full release notes:
-      https://github.com/markhammond/chalkql/releases/tag/v0.7.1
+      https://github.com/markhammond/chalkql/releases/tag/v0.8.0
     </PackageReleaseNotes>
 
     <IncludeSymbols>true</IncludeSymbols>
