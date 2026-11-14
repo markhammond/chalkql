@@ -3861,10 +3861,12 @@ should build an engine over the catalog to check a change before it saves it. A 
 rule by its place among the rules for that column (`…columns[0] (Lat).rules[1].when`), which is
 not always its place in the list you declared.
 
-**A placeholder is what a statement sees.** Where a rule shows a placeholder in place of a value,
-a condition or a join on that column sees the placeholder, not the value. A join on a column every
-user sees as `'NOWHERE'` matches nothing. That is by design: a statement sees what its user sees.
-So write conditions and joins on columns the user is shown in full.
+**A placeholder is what a statement sees.** Say a policy hides an order's `region` from some users
+and shows the word `'hidden'` in its place. If one of those users writes `region = 'EMEA'`, the
+condition matches nothing. Their query never sees `'EMEA'`, only `'hidden'`. The same goes for a
+join: joining orders to another table on `region` finds no matches for that user. This is on
+purpose, since a query can only work with what its user is allowed to see. So base conditions and
+joins on columns the user can see in full.
 
 ## Errors and their codes
 
